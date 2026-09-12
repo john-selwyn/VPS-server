@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Billing</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f6fa;
+            margin: 0;
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+        }
+
+        .item {
+            padding: 12px 0;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .price {
+            font-size: 28px;
+            font-weight: bold;
+            margin-top: 25px;
+        }
+
+        button {
+            margin-top: 25px;
+            padding: 12px 20px;
+            background: #16a34a;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Billing</h1>
+
+    <p>Review your VPS configuration before payment.</p>
+
+    <div class="item">
+        <strong>VPS Name:</strong> {{ name }}
+    </div>
+
+    <div class="item">
+        <strong>CPU:</strong> {{ cpu }} vCPU
+    </div>
+
+    <div class="item">
+        <strong>RAM:</strong> {{ ram }} GB
+    </div>
+
+    <div class="item">
+        <strong>Storage:</strong> {{ storage }} GB SSD
+    </div>
+
+    <div class="item">
+        <strong>Operating System:</strong> {{ os }}
+    </div>
+
+    <div class="item">
+        <strong>Billing Cycle:</strong> {{ billing }}
+    </div>
+
+    <div class="price">
+        ₱999 / month
+    </div>
+
+    <form method="POST">
+        {% csrf_token %}
+
+        <input type="hidden" name="name" value="{{ name }}">
+        <input type="hidden" name="cpu" value="{{ cpu }}">
+        <input type="hidden" name="ram" value="{{ ram }}">
+        <input type="hidden" name="storage" value="{{ storage }}">
+        <input type="hidden" name="os" value="{{ os }}">
+        <input type="hidden" name="billing" value="{{ billing }}">
+
+        <input type="hidden" name="payment" value="success">
+
+<button type="submit">
+    Proceed Payment
+</button>
+    </form>
+
+</div>
+
+</body>
+</html>

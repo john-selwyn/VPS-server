@@ -1,0 +1,12 @@
+<h1>My VPS</h1>
+
+{% for server in vps %}
+    <div>
+        <h2>{{ server.name }}</h2>
+        <p>IP: {{ server.ip_address }}</p>
+        <p>Status: {{ server.status }}</p>
+        <p>Plan: {{ server.plan }}</p>
+    </div>
+{% empty %}
+    <p>No VPS found.</p>
+{% endfor %}

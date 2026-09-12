@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>Deploy VPS</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f5f6fa;
+            margin: 0;
+            padding: 40px;
+        }
+
+        .container {
+            max-width: 700px;
+            margin: auto;
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+        }
+
+        h1 {
+            margin-top: 0;
+        }
+
+        label {
+            display: block;
+            margin-top: 20px;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+
+        select,
+        input {
+            width: 100%;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+
+        button {
+            margin-top: 25px;
+            padding: 12px 20px;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>Deploy a VPS</h1>
+
+    <p>Choose your VPS requirements.</p>
+
+    <form method="POST">
+    {% csrf_token %}
+
+        <label>VPS Name</label>
+        <input type="text" name="name" placeholder="My VPS">
+
+        <label>CPU</label>
+        <select name="cpu">
+            <option value="1">1 vCPU</option>
+            <option value="2">2 vCPU</option>
+            <option value="4">4 vCPU</option>
+            <option value="8">8 vCPU</option>
+        </select>
+
+        <label>RAM</label>
+        <select name="ram">
+            <option value="2">2 GB</option>
+            <option value="4">4 GB</option>
+            <option value="8">8 GB</option>
+            <option value="16">16 GB</option>
+        </select>
+
+        <label>Storage</label>
+        <select name="storage">
+            <option value="20">20 GB SSD</option>
+            <option value="40">40 GB SSD</option>
+            <option value="80">80 GB SSD</option>
+            <option value="160">160 GB SSD</option>
+        </select>
+
+        <label>Operating System</label>
+        <select name="os">
+            <option>Ubuntu 26.04</option>
+            <option>Ubuntu 24.04</option>
+            <option>Debian 13</option>
+            <option>Windows Server</option>
+        </select>
+
+        <label>Billing Cycle</label>
+        <select name="billing">
+            <option>Monthly</option>
+            <option>Quarterly</option>
+            <option>Yearly</option>
+        </select>
+
+        <button type="submit">
+            Continue to Billing
+        </button>
+
+    </form>
+
+</div>
+
+</body>
+</html>

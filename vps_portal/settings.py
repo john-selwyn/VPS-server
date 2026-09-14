@@ -1,3 +1,8 @@
+import os
+from dotenv import load_dotenv
+
+load_dotenv(os.path.expanduser("~/.env"))
+
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -46,7 +51,7 @@ DATABASES = {
         "NAME": "vps_portal",
         "USER": "vps_django",
         "PASSWORD": "ict@1234",
-        "HOST": "127.0.0.1",
+        "HOST": "192.168.80.235",
         "PORT": "5432",
     }
 }

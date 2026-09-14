@@ -6,3 +6,10 @@ db.sqlite3
 *.log
 staticfiles/
 media/
+
+# Server-specific files
+.bash_history
+.cache/
+.gitconfig
+.lesshst
+.psql_history

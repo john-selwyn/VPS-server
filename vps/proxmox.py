@@ -6,9 +6,11 @@ from dotenv import load_dotenv
 from proxmoxer import ProxmoxAPI
 
 
+# Load environment variables
 load_dotenv()
 
 
+# Proxmox configuration
 PROXMOX_HOST = os.getenv("PROXMOX_HOST", "192.168.80.135")
 PROXMOX_USER = os.getenv("PROXMOX_USER", "vps-api@pve")
 PROXMOX_TOKEN_NAME = os.getenv("PROXMOX_TOKEN_NAME", "django")
@@ -18,6 +20,7 @@ PROXMOX_NODE = "test-1"
 VPS_TEMPLATE_VMID = 101
 
 
+# Connect to Proxmox
 proxmox = ProxmoxAPI(
     PROXMOX_HOST,
     user=PROXMOX_USER,
@@ -37,13 +40,20 @@ def sanitize_vps_name(name):
         name = "vps"
 
     name = name.lower().strip()
+
+    # Replace invalid characters with "-"
     name = re.sub(r"[^a-z0-9-]", "-", name)
+
+    # Remove duplicate "-"
     name = re.sub(r"-+", "-", name)
+
+    # Remove "-" from beginning/end
     name = name.strip("-")
 
     if not name:
         name = "vps"
 
+    # DNS hostname maximum length
     return name[:63]
 
 
@@ -70,13 +80,16 @@ def get_next_vmid():
 
 def clone_vps(name):
     """
-    Clone the VPS template and wait for the clone to finish.
+    Clone the VPS template and wait for the clone task to finish.
     """
 
     vmid = get_next_vmid()
+
     safe_name = sanitize_vps_name(name)
 
-    task = proxmox.nodes(PROXMOX_NODE).qemu(VPS_TEMPLATE_VMID).clone.create(
+    task = proxmox.nodes(PROXMOX_NODE).qemu(
+        VPS_TEMPLATE_VMID
+    ).clone.create(
         newid=vmid,
         name=safe_name,
         target=PROXMOX_NODE,
@@ -99,7 +112,10 @@ def wait_for_task(task):
     """
 
     while True:
-        result = proxmox.nodes(PROXMOX_NODE).tasks(task).status.get()
+
+        result = proxmox.nodes(
+            PROXMOX_NODE
+        ).tasks(task).status.get()
 
         if result.get("status") == "stopped":
 

@@ -1,103 +1,111 @@
 import os
 import re
 import time
+from pathlib import Path
 
 from dotenv import load_dotenv
 from proxmoxer import ProxmoxAPI
 
+# Environment always takes precedence; the local .env is only a development fallback.
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-# Load environment variables
-load_dotenv()
-
-
-# Proxmox configuration
-PROXMOX_HOST = os.getenv("PROXMOX_HOST", "192.168.80.135")
-PROXMOX_USER = os.getenv("PROXMOX_USER", "vps-api@pve")
-PROXMOX_TOKEN_NAME = os.getenv("PROXMOX_TOKEN_NAME", "django")
+PROXMOX_HOST = os.getenv("PROXMOX_HOST")
+PROXMOX_USER = os.getenv("PROXMOX_USER")
+PROXMOX_TOKEN_NAME = os.getenv("PROXMOX_TOKEN_NAME")
 PROXMOX_TOKEN_SECRET = os.getenv("PROXMOX_TOKEN_SECRET")
 
 PROXMOX_NODE = "test-1"
 VPS_TEMPLATE_VMID = 101
 
+if not all((PROXMOX_HOST, PROXMOX_USER, PROXMOX_TOKEN_NAME, PROXMOX_TOKEN_SECRET)):
+    raise RuntimeError("Proxmox credentials must be configured with environment variables.")
 
-# Connect to Proxmox
 proxmox = ProxmoxAPI(
-    PROXMOX_HOST,
-    user=PROXMOX_USER,
-    token_name=PROXMOX_TOKEN_NAME,
-    token_value=PROXMOX_TOKEN_SECRET,
-    verify_ssl=False,
-    timeout=30,
+    PROXMOX_HOST, user=PROXMOX_USER, token_name=PROXMOX_TOKEN_NAME,
+    token_value=PROXMOX_TOKEN_SECRET, verify_ssl=False, timeout=30,
 )
 
 
 def sanitize_vps_name(name):
-    """
-    Convert a customer VPS name into a valid Proxmox hostname.
-    """
-
     if not name:
         name = "vps"
 
     name = name.lower().strip()
-
-    # Replace invalid characters with "-"
     name = re.sub(r"[^a-z0-9-]", "-", name)
-
-    # Remove duplicate "-"
     name = re.sub(r"-+", "-", name)
-
-    # Remove "-" from beginning/end
     name = name.strip("-")
 
     if not name:
         name = "vps"
 
-    # DNS hostname maximum length
     return name[:63]
 
 
-def get_next_vmid():
-    """
-    Find the next available VMID starting from 1000.
-    """
-
+def get_next_vmid(reserved_vmids=()):
     existing_vms = proxmox.nodes(PROXMOX_NODE).qemu.get()
-
     existing_vmids = {
         int(vm["vmid"])
         for vm in existing_vms
         if "vmid" in vm
     }
+    existing_vmids.update(int(vmid) for vmid in reserved_vmids if vmid is not None)
 
     vmid = 1000
-
     while vmid in existing_vmids:
         vmid += 1
 
     return vmid
 
 
-def clone_vps(name):
-    """
-    Clone the VPS template and wait for the clone task to finish.
-    """
+def _extract_progress_from_log(lines):
+    """Return the latest 0-100 percentage found in a Proxmox task log."""
+    if not lines:
+        return None
 
-    vmid = get_next_vmid()
+    latest = None
 
+    for entry in lines:
+        if isinstance(entry, dict):
+            text = str(entry.get("t", ""))
+        else:
+            text = str(entry)
+
+        # Handles values such as '(34.21%)' or '34%'.
+        matches = re.findall(r"(?<!\d)(\d+(?:\.\d+)?)%", text)
+        for match in matches:
+            value = float(match)
+            if 0 <= value <= 100:
+                latest = value
+
+    return latest
+
+
+def get_task_progress(task):
+    """Read the latest percentage from the Proxmox task log."""
+    try:
+        log = proxmox.nodes(PROXMOX_NODE).tasks(task).log.get()
+        return _extract_progress_from_log(log)
+    except Exception:
+        # Progress is a UI enhancement. A temporary log-read failure should
+        # never abort the actual provisioning task.
+        return None
+
+
+def clone_vps(name, vmid):
+    """Start a clone and return immediately with the Proxmox UPID.
+
+    Waiting and post-clone configuration are intentionally performed by the
+    provisioning worker, never by a request or status-poll endpoint.
+    """
     safe_name = sanitize_vps_name(name)
 
-    task = proxmox.nodes(PROXMOX_NODE).qemu(
-        VPS_TEMPLATE_VMID
-    ).clone.create(
+    task = proxmox.nodes(PROXMOX_NODE).qemu(VPS_TEMPLATE_VMID).clone.create(
         newid=vmid,
         name=safe_name,
         target=PROXMOX_NODE,
         full=1,
         storage="local-lvm",
     )
-
-    wait_for_task(task)
 
     return {
         "vmid": vmid,
@@ -106,24 +114,29 @@ def clone_vps(name):
     }
 
 
-def wait_for_task(task):
-    """
-    Wait until a Proxmox task finishes.
-    """
-
+def wait_for_task(task, progress_callback=None):
     while True:
-
-        result = proxmox.nodes(
-            PROXMOX_NODE
-        ).tasks(task).status.get()
+        result = proxmox.nodes(PROXMOX_NODE).tasks(task).status.get()
 
         if result.get("status") == "stopped":
-
             if result.get("exitstatus") == "OK":
+                if progress_callback:
+                    progress_callback(90, "Template clone completed.")
                 return True
 
             raise Exception(
                 f"Proxmox task failed: {result.get('exitstatus')}"
             )
+
+        if progress_callback:
+            percent = get_task_progress(task)
+
+            if percent is not None:
+                # Reserve 0-90% for the actual template clone.
+                mapped = 5 + int(percent * 0.85)
+                mapped = min(90, max(5, mapped))
+                progress_callback(mapped, f"Cloning VPS... {percent:.0f}%")
+            else:
+                progress_callback(5, "Cloning VPS template...")
 
         time.sleep(2)

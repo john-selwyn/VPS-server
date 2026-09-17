@@ -1,10 +1,24 @@
-from django.contrib import admin
 from django.urls import path
-from vps.views import dashboard, vps_list
-
+from . import views
 
 urlpatterns = [
-    path("", dashboard, name="dashboard"),
-    path("admin/", admin.site.urls),
-    path("vps/", vps_list, name="vps_list"),
+    path("", views.dashboard, name="dashboard"),
+
+    path(
+        "order/",
+        views.order_vps,
+        name="order_vps",
+    ),
+
+    path(
+        "provisioning/<int:vps_id>/",
+        views.provisioning,
+        name="provisioning",
+    ),
+
+    path(
+        "provisioning/<int:vps_id>/status/",
+        views.provisioning_status,
+        name="provisioning_status",
+    ),
 ]

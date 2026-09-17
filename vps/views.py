@@ -1,252 +1,126 @@
-from django.shortcuts import render, redirect
-from django.contrib import messages
+import subprocess
+import sys
+import uuid
+
+from django.conf import settings
+from django.db import IntegrityError, transaction
+from django.http import JsonResponse
+from django.shortcuts import get_object_or_404, redirect, render
 
 from .models import VPS
-from .proxmox import clone_vps, proxmox, PROXMOX_NODE
+from .proxmox import clone_vps, get_next_vmid
 
 
 def dashboard(request):
-
-    vps_list = VPS.objects.all()
-
-    return render(
-        request,
-        "vps/dashboard.html",
-        {
-            "vps_list": vps_list,
-        },
-    )
+    return render(request, "vps/dashboard.html", {"vps_list": VPS.objects.all().order_by("-created_at")})
 
 
-def vps_list(request):
+def _pending_orders(request):
+    return request.session.setdefault("pending_vps_orders", {})
 
-    vps = VPS.objects.all()
 
-    return render(
-        request,
-        "vps/list.html",
-        {
-            "vps": vps,
-        },
-    )
+def _configuration_from_request(request):
+    values = {key: request.POST.get(key, "").strip() for key in ("name", "cpu", "ram", "storage", "os", "billing")}
+    if not all(values.values()):
+        raise ValueError("Please complete all VPS configuration fields.")
+    try:
+        values["cpu"] = int(values["cpu"])
+        values["ram"] = int(values["ram"])
+        values["storage"] = int(values["storage"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Invalid VPS configuration.") from exc
+    if values["cpu"] <= 0 or values["ram"] <= 0 or values["storage"] <= 0:
+        raise ValueError("VPS resources must be positive values.")
+    return values
+
+
+def _start_worker(vps_id):
+    command = [sys.executable, str(settings.BASE_DIR / "manage.py"), "provision_vps", str(vps_id)]
+    subprocess.Popen(command, cwd=settings.BASE_DIR, close_fds=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def _create_and_start_clone(configuration, order_token):
+    """Reserve a VMID and submit Proxmox's asynchronous clone request."""
+    for _ in range(3):
+        try:
+            with transaction.atomic():
+                reserved = VPS.objects.exclude(vmid__isnull=True).values_list("vmid", flat=True)
+                vmid = get_next_vmid(reserved)
+                vps = VPS.objects.create(
+                    name=configuration["name"], vmid=vmid, status="Provisioning", progress=1,
+                    current_step="Preparing VPS", progress_message="Preparing VPS",
+                    cpu=configuration["cpu"], ram=configuration["ram"], storage=configuration["storage"],
+                    operating_system=configuration["os"], billing_cycle=configuration["billing"],
+                    plan=f'{configuration["ram"]}GB VPS', order_token=order_token,
+                )
+                try:
+                    result = clone_vps(vps.name, vmid)
+                except Exception as exc:
+                    vps.status = "Failed"
+                    vps.current_step = "Provisioning failed."
+                    vps.progress_message = vps.current_step
+                    vps.error_message = str(exc)
+                    vps.save(update_fields=["status", "current_step", "progress_message", "error_message"])
+                    return vps
+                vps.task_upid = result["task"]
+                vps.progress = 5
+                vps.current_step = "Cloning template"
+                vps.progress_message = "Cloning template"
+                vps.save(update_fields=["task_upid", "progress", "current_step", "progress_message"])
+                transaction.on_commit(lambda: _start_worker(vps.id))
+                return vps
+        except IntegrityError:
+            winner = VPS.objects.filter(order_token=order_token).first()
+            if winner:
+                return winner
+            continue
+    raise RuntimeError("Could not reserve an available VMID; please try again.")
 
 
 def order_vps(request):
-
-    if request.method == "POST":
-
-        name = request.POST.get("name")
-
-        cpu = request.POST.get("cpu")
-        ram = request.POST.get("ram")
-        storage = request.POST.get("storage")
-
-        os = request.POST.get("os")
-        billing = request.POST.get("billing")
-
-        # Validate required values
-        if not all([
-            name,
-            cpu,
-            ram,
-            storage,
-            os,
-            billing,
-        ]):
-
-            return render(
-                request,
-                "vps/order.html",
-                {
-                    "error": "Please complete all VPS configuration fields."
-                },
-            )
-
+    if request.method != "POST":
+        return render(request, "vps/order.html")
+    if request.POST.get("payment") != "success":
         try:
+            configuration = _configuration_from_request(request)
+        except ValueError as exc:
+            return render(request, "vps/order.html", {"error": str(exc)})
+        order_token = str(uuid.uuid4())
+        pending = _pending_orders(request)
+        pending[order_token] = configuration
+        request.session.modified = True
+        return render(request, "vps/billing.html", {**configuration, "order_token": order_token})
 
-            cpu = int(cpu)
-            ram = int(ram)
-            storage = int(storage)
+    order_token = request.POST.get("order_token", "")
+    try:
+        token_uuid = uuid.UUID(order_token)
+    except (ValueError, TypeError):
+        return render(request, "vps/order.html", {"error": "Your payment session is invalid. Please place the order again."})
+    existing = VPS.objects.filter(order_token=token_uuid).first()
+    if existing:
+        return redirect("provisioning", vps_id=existing.id)
+    configuration = _pending_orders(request).get(order_token)
+    if not configuration:
+        return render(request, "vps/order.html", {"error": "Your payment session has expired. Please place the order again."})
+    try:
+        vps = _create_and_start_clone(configuration, token_uuid)
+    except Exception as exc:
+        return render(request, "vps/billing.html", {**configuration, "order_token": order_token, "error": str(exc)})
+    _pending_orders(request).pop(order_token, None)
+    request.session.modified = True
+    return redirect("provisioning", vps_id=vps.id)
 
-        except ValueError:
 
-            return render(
-                request,
-                "vps/order.html",
-                {
-                    "error": "Invalid VPS configuration."
-                },
-            )
+def provisioning(request, vps_id):
+    return render(request, "vps/provisioning.html", {"vps": get_object_or_404(VPS, id=vps_id)})
 
-        # Payment confirmed
-        if request.POST.get("payment") == "success":
 
-            try:
-
-                # -------------------------------------------------
-                # 1. Clone template
-                # -------------------------------------------------
-
-                result = clone_vps(name)
-
-                vmid = result["vmid"]
-
-                vps = proxmox.nodes(
-                    PROXMOX_NODE
-                ).qemu(vmid)
-
-                # -------------------------------------------------
-                # 2. Remove installer ISO
-                # -------------------------------------------------
-
-                config = vps.config.get()
-
-                if "ide2" in config:
-
-                    vps.config.set(
-                        delete="ide2"
-                    )
-
-                # -------------------------------------------------
-                # 3. Configure CPU and RAM
-                # -------------------------------------------------
-
-                vps.config.set(
-                    cores=cpu,
-                    memory=ram * 1024,
-                )
-
-                # -------------------------------------------------
-                # 4. Find VPS disk
-                # -------------------------------------------------
-
-                config = vps.config.get()
-
-                disk_name = None
-
-                for key in config:
-
-                    if key.startswith(
-                        ("scsi", "virtio", "sata")
-                    ):
-
-                        disk_name = key
-
-                        break
-
-                # -------------------------------------------------
-                # 5. Resize disk
-                # -------------------------------------------------
-
-                if disk_name:
-
-                    current_disk = config[disk_name]
-
-                    current_size = 32
-
-                    if "size=" in current_disk:
-
-                        size_text = current_disk.split(
-                            "size="
-                        )[1]
-
-                        size_text = size_text.split(
-                            ","
-                        )[0]
-
-                        if size_text.lower().endswith("g"):
-
-                            current_size = int(
-                                float(
-                                    size_text[:-1]
-                                )
-                            )
-
-                    # Only expand disks.
-                    # Never shrink a disk.
-                    if storage > current_size:
-
-                        additional_storage = (
-                            storage - current_size
-                        )
-
-                        vps.resize.set(
-                            disk=disk_name,
-                            size=f"+{additional_storage}G",
-                        )
-
-                # -------------------------------------------------
-                # 6. Start VPS
-                # -------------------------------------------------
-
-                vps.status.start.post()
-
-                # -------------------------------------------------
-                # 7. Save VPS to PostgreSQL
-                # -------------------------------------------------
-
-                VPS.objects.create(
-
-                    name=name,
-
-                    vmid=vmid,
-
-                    ip_address="0.0.0.0",
-
-                    status="Provisioning",
-
-                    cpu=cpu,
-
-                    ram=ram,
-
-                    storage=storage,
-
-                    operating_system=os,
-
-                    billing_cycle=billing,
-
-                    plan=f"{ram}GB VPS",
-                )
-
-                return redirect("dashboard")
-
-            except Exception as e:
-
-                # If provisioning fails,
-                # don't silently fail.
-
-                return render(
-                    request,
-                    "vps/billing.html",
-                    {
-                        "name": name,
-                        "cpu": cpu,
-                        "ram": ram,
-                        "storage": storage,
-                        "os": os,
-                        "billing": billing,
-                        "error": str(e),
-                    },
-                )
-
-        # ---------------------------------------------------------
-        # Payment page
-        # ---------------------------------------------------------
-
-        return render(
-            request,
-            "vps/billing.html",
-            {
-                "name": name,
-                "cpu": cpu,
-                "ram": ram,
-                "storage": storage,
-                "os": os,
-                "billing": billing,
-            },
-        )
-
-    return render(
-        request,
-        "vps/order.html",
-    )
+def provisioning_status(request, vps_id):
+    """Read-only: the background worker owns all Proxmox mutations."""
+    vps = get_object_or_404(VPS, id=vps_id)
+    failed = vps.status == "Failed"
+    ready = vps.status == "Running"
+    return JsonResponse({"status": "failed" if failed else "completed" if ready else "processing",
+                         "progress": vps.progress, "message": vps.current_step or vps.progress_message,
+                         "current_step": vps.current_step, "vmid": vps.vmid,
+                         "error": vps.error_message or "", "failed": failed, "ready": ready})

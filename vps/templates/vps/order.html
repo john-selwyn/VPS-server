@@ -3,69 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>Deploy VPS</title>
+    <title>Order VPS</title>
 
     <style>
-        * {
-            box-sizing: border-box;
-        }
-
         body {
-            margin: 0;
             font-family: Arial, sans-serif;
-            background: #f4f7fb;
-            color: #1f2937;
-        }
-
-        .header {
-            background: #111827;
-            color: white;
-            padding: 20px 40px;
-        }
-
-        .header h2 {
+            background: #f5f6fa;
             margin: 0;
-            font-size: 20px;
+            padding: 40px;
         }
 
-        .page {
-            max-width: 1100px;
-            margin: 40px auto;
-            padding: 0 20px;
-        }
-
-        .page-title {
-            margin-bottom: 25px;
-        }
-
-        .page-title h1 {
-            margin: 0 0 8px;
-            font-size: 32px;
-        }
-
-        .page-title p {
-            margin: 0;
-            color: #6b7280;
-        }
-
-        .layout {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 25px;
-        }
-
-        .card {
+        .container {
+            max-width: 700px;
+            margin: auto;
             background: white;
-            border-radius: 12px;
-            padding: 28px;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+            padding: 30px;
+            border-radius: 10px;
         }
 
-        .card h2 {
+        h1 {
             margin-top: 0;
-            margin-bottom: 25px;
-            font-size: 20px;
         }
 
         .form-group {
@@ -74,263 +31,142 @@
 
         label {
             display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
+            font-weight: bold;
+            margin-bottom: 7px;
         }
 
         input,
         select {
             width: 100%;
-            padding: 12px 14px;
-            border: 1px solid #d1d5db;
-            border-radius: 7px;
+            padding: 11px;
+            box-sizing: border-box;
+            border: 1px solid #ccc;
+            border-radius: 6px;
             font-size: 15px;
-            background: white;
-        }
-
-        input:focus,
-        select:focus {
-            outline: none;
-            border-color: #2563eb;
-        }
-
-        .summary-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 13px 0;
-            border-bottom: 1px solid #e5e7eb;
-        }
-
-        .summary-item:last-child {
-            border-bottom: none;
-        }
-
-        .summary-label {
-            color: #6b7280;
-        }
-
-        .summary-value {
-            font-weight: 600;
-        }
-
-        .price {
-            margin-top: 25px;
-            padding-top: 20px;
-            border-top: 2px solid #e5e7eb;
-        }
-
-        .price-label {
-            color: #6b7280;
-            font-size: 14px;
-        }
-
-        .price-value {
-            font-size: 30px;
-            font-weight: bold;
-            margin-top: 5px;
         }
 
         button {
             width: 100%;
-            margin-top: 25px;
-            padding: 14px;
-            background: #2563eb;
+            padding: 13px;
+            background: #16a34a;
             color: white;
             border: none;
-            border-radius: 7px;
+            border-radius: 6px;
             font-size: 16px;
-            font-weight: 600;
             cursor: pointer;
         }
 
         button:hover {
-            background: #1d4ed8;
+            background: #15803d;
         }
 
-        @media (max-width: 800px) {
-            .layout {
-                grid-template-columns: 1fr;
-            }
-
-            .header {
-                padding: 20px;
-            }
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
         }
     </style>
 </head>
 
 <body>
 
-<div class="header">
-    <h2>VPS Hosting</h2>
-</div>
+<div class="container">
 
-<div class="page">
+    <h1>Configure Your VPS</h1>
 
-    <div class="page-title">
-        <h1>Deploy a VPS</h1>
-        <p>Configure your virtual private server.</p>
-    </div>
+    <p>Choose the resources for your VPS.</p>
 
-    <div class="layout">
+    {% if error %}
+        <div class="error">
+            {{ error }}
+        </div>
+    {% endif %}
 
-        <!-- VPS Configuration -->
+    <form method="POST">
 
-        <div class="card">
+        {% csrf_token %}
 
-            <h2>VPS Configuration</h2>
-
-            <form method="POST">
-
-                {% csrf_token %}
-
-                <div class="form-group">
-                    <label for="name">VPS Name</label>
-
-                    <input
-                        type="text"
-                        id="name"
-                        name="name"
-                        placeholder="My VPS"
-                        required
-                    >
-                </div>
-
-                <div class="form-group">
-                    <label for="cpu">CPU</label>
-
-                    <select id="cpu" name="cpu">
-                        <option value="1">1 vCPU</option>
-                        <option value="2" selected>2 vCPU</option>
-                        <option value="4">4 vCPU</option>
-                        <option value="8">8 vCPU</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="ram">RAM</label>
-
-                    <select id="ram" name="ram">
-                        <option value="2" selected>2 GB</option>
-                        <option value="4">4 GB</option>
-                        <option value="8">8 GB</option>
-                        <option value="16">16 GB</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="storage">Storage</label>
-
-                    <select id="storage" name="storage">
-                        <option value="20">20 GB SSD</option>
-                        <option value="40">40 GB SSD</option>
-                        <option value="80">80 GB SSD</option>
-                        <option value="160">160 GB SSD</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="os">Operating System</label>
-
-                    <select id="os" name="os">
-                        <option>Ubuntu 26.04</option>
-                        <option>Ubuntu 24.04</option>
-                        <option>Debian 13</option>
-                        <option>Windows Server</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="billing">Billing Cycle</label>
-
-                    <select id="billing" name="billing">
-                        <option>Monthly</option>
-                        <option>Quarterly</option>
-                        <option>Yearly</option>
-                    </select>
-                </div>
-
-                <button type="submit">
-                    Continue to Billing
-                </button>
-
-            </form>
-
+        <div class="form-group">
+            <label>VPS Name</label>
+            <input
+                type="text"
+                name="name"
+                placeholder="my-server"
+                required
+            >
         </div>
 
-
-        <!-- Order Summary -->
-
-        <div class="card">
-
-            <h2>Order Summary</h2>
-
-            <div class="summary-item">
-                <span class="summary-label">CPU</span>
-                <span class="summary-value" id="summaryCpu">2 vCPU</span>
-            </div>
-
-            <div class="summary-item">
-                <span class="summary-label">RAM</span>
-                <span class="summary-value" id="summaryRam">2 GB</span>
-            </div>
-
-            <div class="summary-item">
-                <span class="summary-label">Storage</span>
-                <span class="summary-value" id="summaryStorage">20 GB SSD</span>
-            </div>
-
-            <div class="summary-item">
-                <span class="summary-label">Operating System</span>
-                <span class="summary-value" id="summaryOs">Ubuntu 26.04</span>
-            </div>
-
-            <div class="summary-item">
-                <span class="summary-label">Billing</span>
-                <span class="summary-value" id="summaryBilling">Monthly</span>
-            </div>
-
-            <div class="price">
-                <div class="price-label">Estimated price</div>
-                <div class="price-value">₱0.00</div>
-            </div>
-
+        <div class="form-group">
+            <label>CPU</label>
+            <select name="cpu" required>
+                <option value="2">2 vCPU</option>
+                <option value="4">4 vCPU</option>
+                <option value="6">6 vCPU</option>
+                <option value="8">8 vCPU</option>
+            </select>
         </div>
 
-    </div>
+        <div class="form-group">
+            <label>RAM</label>
+            <select name="ram" required>
+                <option value="2">2 GB</option>
+                <option value="4">4 GB</option>
+                <option value="8">8 GB</option>
+                <option value="16">16 GB</option>
+                <option value="32">32 GB</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Storage</label>
+            <select name="storage" required>
+                <option value="32">32 GB SSD</option>
+                <option value="40">40 GB SSD</option>
+                <option value="64">64 GB SSD</option>
+                <option value="80">80 GB SSD</option>
+                <option value="100">100 GB SSD</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Operating System</label>
+            <select name="os" required>
+                <option value="Ubuntu 26.04">
+                    Ubuntu 26.04
+                </option>
+
+                <option value="Ubuntu 24.04">
+                    Ubuntu 24.04
+                </option>
+
+                <option value="Debian 13">
+                    Debian 13
+                </option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Billing Cycle</label>
+            <select name="billing" required>
+                <option value="Monthly">
+                    Monthly
+                </option>
+
+                <option value="Yearly">
+                    Yearly
+                </option>
+            </select>
+        </div>
+
+        <button type="submit">
+            Continue to Billing
+        </button>
+
+    </form>
 
 </div>
-
-<script>
-    const cpu = document.getElementById("cpu");
-    const ram = document.getElementById("ram");
-    const storage = document.getElementById("storage");
-    const os = document.getElementById("os");
-    const billing = document.getElementById("billing");
-
-    function updateSummary() {
-        document.getElementById("summaryCpu").textContent =
-            cpu.value + " vCPU";
-
-        document.getElementById("summaryRam").textContent =
-            ram.value + " GB";
-
-        document.getElementById("summaryStorage").textContent =
-            storage.value + " GB SSD";
-
-        document.getElementById("summaryOs").textContent =
-            os.value;
-
-        document.getElementById("summaryBilling").textContent =
-            billing.value;
-    }
-
-    cpu.addEventListener("change", updateSummary);
-    ram.addEventListener("change", updateSummary);
-    storage.addEventListener("change", updateSummary);
-    os.addEventListener("change", updateSummary);
-    billing.addEventListener("change", updateSummary);
-</script>
 
 </body>
 </html>

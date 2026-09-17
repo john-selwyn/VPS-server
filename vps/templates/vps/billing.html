@@ -34,13 +34,29 @@
         }
 
         button {
+            width: 100%;
             margin-top: 25px;
-            padding: 12px 20px;
+            padding: 13px;
             background: #16a34a;
             color: white;
             border: none;
             border-radius: 6px;
             cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background: #15803d;
+        }
+
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fecaca;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            word-break: break-word;
         }
     </style>
 </head>
@@ -51,30 +67,45 @@
 
     <h1>Billing</h1>
 
-    <p>Review your VPS configuration before payment.</p>
+    <p>
+        Review your VPS configuration before payment.
+    </p>
+
+    {% if error %}
+        <div class="error">
+            <strong>Provisioning Error</strong><br><br>
+            {{ error }}
+        </div>
+    {% endif %}
 
     <div class="item">
-        <strong>VPS Name:</strong> {{ name }}
+        <strong>VPS Name:</strong>
+        {{ name }}
     </div>
 
     <div class="item">
-        <strong>CPU:</strong> {{ cpu }} vCPU
+        <strong>CPU:</strong>
+        {{ cpu }} vCPU
     </div>
 
     <div class="item">
-        <strong>RAM:</strong> {{ ram }} GB
+        <strong>RAM:</strong>
+        {{ ram }} GB
     </div>
 
     <div class="item">
-        <strong>Storage:</strong> {{ storage }} GB SSD
+        <strong>Storage:</strong>
+        {{ storage }} GB SSD
     </div>
 
     <div class="item">
-        <strong>Operating System:</strong> {{ os }}
+        <strong>Operating System:</strong>
+        {{ os }}
     </div>
 
     <div class="item">
-        <strong>Billing Cycle:</strong> {{ billing }}
+        <strong>Billing Cycle:</strong>
+        {{ billing }}
     </div>
 
     <div class="price">
@@ -82,20 +113,57 @@
     </div>
 
     <form method="POST">
+
         {% csrf_token %}
 
-        <input type="hidden" name="name" value="{{ name }}">
-        <input type="hidden" name="cpu" value="{{ cpu }}">
-        <input type="hidden" name="ram" value="{{ ram }}">
-        <input type="hidden" name="storage" value="{{ storage }}">
-        <input type="hidden" name="os" value="{{ os }}">
-        <input type="hidden" name="billing" value="{{ billing }}">
+        <input
+            type="hidden"
+            name="name"
+            value="{{ name }}"
+        >
 
-        <input type="hidden" name="payment" value="success">
+        <input
+            type="hidden"
+            name="cpu"
+            value="{{ cpu }}"
+        >
 
-<button type="submit">
-    Proceed Payment
-</button>
+        <input
+            type="hidden"
+            name="ram"
+            value="{{ ram }}"
+        >
+
+        <input
+            type="hidden"
+            name="storage"
+            value="{{ storage }}"
+        >
+
+        <input
+            type="hidden"
+            name="os"
+            value="{{ os }}"
+        >
+
+        <input
+            type="hidden"
+            name="billing"
+            value="{{ billing }}"
+        >
+
+        <input
+            type="hidden"
+            name="payment"
+            value="success"
+        >
+
+        <input type="hidden" name="order_token" value="{{ order_token }}">
+
+        <button type="submit">
+            Proceed Payment
+        </button>
+
     </form>
 
 </div>

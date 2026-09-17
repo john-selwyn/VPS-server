@@ -8,148 +8,256 @@
 
     <style>
         body {
-            margin: 0;
             font-family: Arial, sans-serif;
             background: #f5f6fa;
-            color: #222;
-        }
-
-        .navbar {
-            background: #1f2937;
-            color: white;
-            padding: 18px 30px;
-            display: flex;
-            justify-content: space-between;
-        }
-
-        .navbar h2 {
             margin: 0;
+            padding: 40px;
         }
 
         .container {
             max-width: 1100px;
-            margin: 40px auto;
-            padding: 0 20px;
+            margin: auto;
         }
 
-        .welcome {
-            margin-bottom: 30px;
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
         }
 
-        .welcome h1 {
-            margin-bottom: 5px;
+        h1 {
+            margin: 0;
         }
 
-        .vps-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
+        .order-button {
+            background: #16a34a;
+            color: white;
+            text-decoration: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            font-weight: bold;
         }
 
-        .vps-card {
+        .order-button:hover {
+            background: #15803d;
+        }
+
+        .card {
             background: white;
-            padding: 25px;
             border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 3px 15px rgba(0,0,0,0.06);
         }
 
-        .vps-card h2 {
+        .card h2 {
             margin-top: 0;
+            margin-bottom: 20px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th {
+            text-align: left;
+            background: #f1f5f9;
+            padding: 14px;
+        }
+
+        td {
+            padding: 14px;
+            border-bottom: 1px solid #e5e7eb;
         }
 
         .status {
             display: inline-block;
             padding: 5px 10px;
             border-radius: 20px;
-            background: #dcfce7;
-            color: #166534;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: bold;
         }
 
-        .info {
-            margin: 10px 0;
+        .running {
+            background: #dcfce7;
+            color: #166534;
         }
 
-        .button {
-            display: inline-block;
-            margin-top: 15px;
-            padding: 10px 15px;
-            background: #2563eb;
-            color: white;
-            text-decoration: none;
-            border-radius: 6px;
+        .provisioning {
+            background: #fef3c7;
+            color: #92400e;
         }
 
-        .button:hover {
-            background: #1d4ed8;
+        .failed {
+            background: #fee2e2;
+            color: #991b1b;
         }
 
         .empty {
-            background: white;
+            text-align: center;
+            color: #666;
             padding: 30px;
-            border-radius: 10px;
+        }
+
+        .specs {
+            line-height: 1.7;
         }
     </style>
 </head>
 
 <body>
 
-    <div class="navbar">
-        <h2>VPS Portal</h2>
-        <span>Dashboard</span>
-    </div>
+<div class="container">
 
-    <div class="container">
+    <div class="header">
 
-        <div class="welcome">
-            <h1>My VPS</h1>
-            <p>Manage your virtual private servers.</p>
-        </div>
+        <h1>VPS Dashboard</h1>
 
-        <div class="vps-grid">
-
-            {% for server in vps_list %}
-
-                <div class="vps-card">
-
-                    <h2>{{ server.name }}</h2>
-
-                    <div class="info">
-                        <strong>IP Address:</strong>
-                        {{ server.ip_address }}
-                    </div>
-
-                    <div class="info">
-                        <strong>Plan:</strong>
-                        {{ server.plan }}
-                    </div>
-
-                    <div class="info">
-                        <strong>Status:</strong>
-                        <span class="status">
-                            {{ server.status }}
-                        </span>
-                    </div>
-
-                    <a href="/vps/" class="button">
-                        View VPS
-                    </a>
-
-                </div>
-
-            {% empty %}
-
-                <div class="empty">
-                    <h2>No VPS found</h2>
-                    <p>You don't have any VPS servers yet.</p>
-                </div>
-
-            {% endfor %}
-
-        </div>
+        <a
+            href="{% url 'order_vps' %}"
+            class="order-button"
+        >
+            + Create VPS
+        </a>
 
     </div>
+
+    <div class="card">
+
+        <h2>My VPS Servers</h2>
+
+        {% if vps_list %}
+
+        <div class="table-container">
+
+            <table>
+
+                <thead>
+
+                    <tr>
+                        <th>Name</th>
+                        <th>VMID</th>
+                        <th>IP Address</th>
+                        <th>Resources</th>
+                        <th>Operating System</th>
+                        <th>Billing</th>
+                        <th>Status</th>
+                        <th>Provisioning</th>
+                    </tr>
+
+                </thead>
+
+                <tbody>
+
+                {% for vps in vps_list %}
+
+                    <tr>
+
+                        <td>
+                            <strong>
+                                {{ vps.name }}
+                            </strong>
+                        </td>
+
+                        <td>
+                            {% if vps.status == "Provisioning" %}
+                                <a href="{% url 'provisioning' vps.pk %}">
+                                    {{ vps.progress }}% — {{ vps.current_step }}
+                                </a>
+                            {% elif vps.status == "Failed" %}
+                                <span title="{{ vps.error_message }}">{{ vps.error_message|default:"Provisioning failed." }}</span>
+                            {% else %}
+                                Ready
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if vps.vmid %}
+                                {{ vps.vmid }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if vps.ip_address == "0.0.0.0" %}
+                                Assigning...
+                            {% else %}
+                                {{ vps.ip_address }}
+                            {% endif %}
+                        </td>
+
+                        <td class="specs">
+                            {{ vps.cpu }} vCPU<br>
+                            {{ vps.ram }} GB RAM<br>
+                            {{ vps.storage }} GB SSD
+                        </td>
+
+                        <td>
+                            {{ vps.operating_system }}
+                        </td>
+
+                        <td>
+                            {{ vps.billing_cycle }}
+                        </td>
+
+                        <td>
+
+                            {% if vps.status == "Running" %}
+
+                                <span class="status running">
+                                    Running
+                                </span>
+
+                            {% elif vps.status == "Provisioning" %}
+
+                                <span class="status provisioning">
+                                    Provisioning
+                                </span>
+
+                            {% elif vps.status == "Failed" %}
+
+                                <span class="status failed">
+                                    Failed
+                                </span>
+
+                            {% else %}
+
+                                <span class="status">
+                                    {{ vps.status }}
+                                </span>
+
+                            {% endif %}
+
+                        </td>
+
+                    </tr>
+
+                {% endfor %}
+
+                </tbody>
+
+            </table>
+
+        </div>
+
+        {% else %}
+
+            <div class="empty">
+                You don't have any VPS servers yet.
+            </div>
+
+        {% endif %}
+
+    </div>
+
+</div>
 
 </body>
 </html>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Creating Your VPS</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+            font-family: Arial, sans-serif;
+            background: #f5f7fb;
+            color: #172033;
+        }
+
+        .card {
+            width: 100%;
+            max-width: 650px;
+            background: #fff;
+            border-radius: 18px;
+            padding: 42px;
+            box-shadow: 0 12px 35px rgba(15, 23, 42, 0.10);
+            text-align: center;
+        }
+
+        .icon {
+            width: 64px;
+            height: 64px;
+            margin: 0 auto 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #e8f1ff;
+            color: #2563eb;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        h1 {
+            margin: 0 0 8px;
+            font-size: 30px;
+        }
+
+        .subtitle {
+            margin: 0 0 30px;
+            color: #64748b;
+        }
+
+        .percent {
+            font-size: 58px;
+            line-height: 1;
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+
+        .progress-track {
+            width: 100%;
+            height: 16px;
+            overflow: hidden;
+            background: #e5e7eb;
+            border-radius: 999px;
+            margin-bottom: 18px;
+        }
+
+        .progress-bar {
+            width: 0%;
+            height: 100%;
+            border-radius: inherit;
+            background: #2563eb;
+            transition: width 0.5s ease;
+        }
+
+        .message {
+            min-height: 24px;
+            font-size: 17px;
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .details {
+            margin-top: 28px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            color: #64748b;
+            font-size: 14px;
+        }
+
+        .error {
+            display: none;
+            margin-top: 22px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
+            text-align: left;
+            word-break: break-word;
+        }
+
+        .success {
+            background: #16a34a;
+        }
+
+        .failed {
+            background: #dc2626;
+        }
+    </style>
+</head>
+
+<body>
+<div class="card">
+    <div class="icon" id="icon">⚙</div>
+
+    <h1>Creating Your VPS</h1>
+
+    <p class="subtitle">
+        Please keep this page open while we prepare your server.
+    </p>
+
+    <div class="percent" id="percent">0%</div>
+
+    <div class="progress-track">
+        <div class="progress-bar" id="progressBar"></div>
+    </div>
+
+    <div class="message" id="message">
+        {{ vps.current_step }}
+    </div>
+
+    <div class="details">
+        VPS: <strong>{{ vps.name }}</strong>
+        <br>
+        Your browser will automatically continue when the VPS is ready.
+    </div>
+
+    <div class="error" id="error"></div>
+
+    <div class="details" style="text-align: left; line-height: 1.8;">
+        Preparing VPS → Cloning template → Removing installation media →
+        Configuring CPU and RAM → Configuring storage → Starting VPS → VPS Ready
+    </div>
+</div>
+
+<script>
+    const statusUrl = "{% url 'provisioning_status' vps.pk %}";
+    const dashboardUrl = "{% url 'dashboard' %}";
+
+    const percentEl = document.getElementById("percent");
+    const progressBar = document.getElementById("progressBar");
+    const messageEl = document.getElementById("message");
+    const errorEl = document.getElementById("error");
+    const iconEl = document.getElementById("icon");
+
+    let polling = true;
+
+    async function checkStatus() {
+        if (!polling) return;
+
+        try {
+            const response = await fetch(statusUrl, {
+                cache: "no-store",
+                headers: {
+                    "X-Requested-With": "XMLHttpRequest"
+                }
+            });
+
+            if (!response.ok) {
+                throw new Error("Unable to check provisioning status.");
+            }
+
+            const data = await response.json();
+            const progress = Math.max(0, Math.min(100, Number(data.progress) || 0));
+
+            percentEl.textContent = `${progress}%`;
+            progressBar.style.width = `${progress}%`;
+            messageEl.textContent = data.message || "Provisioning VPS...";
+
+            if (data.failed) {
+                polling = false;
+                progressBar.classList.add("failed");
+                iconEl.textContent = "!";
+                errorEl.style.display = "block";
+                errorEl.textContent = data.error || "The VPS could not be provisioned.";
+                messageEl.textContent = "Provisioning failed.";
+                return;
+            }
+
+            if (data.ready) {
+                polling = false;
+                progressBar.classList.add("success");
+                iconEl.textContent = "✓";
+                percentEl.textContent = "100%";
+                messageEl.textContent = "VPS is ready! Redirecting...";
+
+                setTimeout(() => {
+                    window.location.href = dashboardUrl;
+                }, 1200);
+                return;
+            }
+
+            setTimeout(checkStatus, 2000);
+        } catch (error) {
+            messageEl.textContent = "Checking VPS status...";
+            setTimeout(checkStatus, 3000);
+        }
+    }
+
+    checkStatus();
+</script>
+</body>
+</html>

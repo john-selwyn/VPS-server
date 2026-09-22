@@ -9,7 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 SECRET_KEY = "change-this-in-production"
 DEBUG = True
-ALLOWED_HOSTS = ["127.0.0.1", "localhost","192.168.80.48"]
+ALLOWED_HOSTS = ["127.0.0.1", "localhost","220.100.130.190"]
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -51,7 +51,7 @@ DATABASES = {
         "NAME": "vps_portal",
         "USER": "vps_django",
         "PASSWORD": "ict@1234",
-        "HOST": "192.168.80.235",
+        "HOST": "220.100.130.236",
         "PORT": "5432",
     }
 }

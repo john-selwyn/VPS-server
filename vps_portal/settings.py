@@ -6,6 +6,7 @@ load_dotenv(os.path.expanduser("~/.env"))
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+BILLING_API_SECRET = os.environ.get("BILLING_API_SECRET", "")
 
 SECRET_KEY = "change-this-in-production"
 DEBUG = True

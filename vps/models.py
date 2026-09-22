@@ -4,6 +4,7 @@ from django.db import models
 
 
 class VPS(models.Model):
+    billing_order_id = models.PositiveBigIntegerField(unique=True, null=True, blank=True)
     name = models.CharField(max_length=100)
     vmid = models.IntegerField(unique=True, null=True, blank=True)
     ip_address = models.GenericIPAddressField(default="0.0.0.0")

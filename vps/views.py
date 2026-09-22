@@ -39,20 +39,27 @@ def _start_worker(vps_id):
     subprocess.Popen(command, cwd=settings.BASE_DIR, close_fds=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
-def _create_and_start_clone(configuration, order_token):
+def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
     """Reserve a VMID and submit Proxmox's asynchronous clone request."""
     for _ in range(3):
         try:
             with transaction.atomic():
                 reserved = VPS.objects.exclude(vmid__isnull=True).values_list("vmid", flat=True)
                 vmid = get_next_vmid(reserved)
-                vps = VPS.objects.create(
+                fields = dict(
                     name=configuration["name"], vmid=vmid, status="Provisioning", progress=1,
                     current_step="Preparing VPS", progress_message="Preparing VPS",
                     cpu=configuration["cpu"], ram=configuration["ram"], storage=configuration["storage"],
                     operating_system=configuration["os"], billing_cycle=configuration["billing"],
-                    plan=f'{configuration["ram"]}GB VPS', order_token=order_token,
+                    plan=configuration.get("plan", f'{configuration["ram"]}GB VPS'), order_token=order_token,
                 )
+                if reserved_vps is None:
+                    vps = VPS.objects.create(**fields)
+                else:
+                    vps = VPS.objects.get(pk=reserved_vps.pk)
+                    for field, value in fields.items():
+                        setattr(vps, field, value)
+                    vps.save(update_fields=list(fields))
                 try:
                     result = clone_vps(vps.name, vmid)
                 except Exception as exc:
@@ -70,7 +77,7 @@ def _create_and_start_clone(configuration, order_token):
                 transaction.on_commit(lambda: _start_worker(vps.id))
                 return vps
         except IntegrityError:
-            winner = VPS.objects.filter(order_token=order_token).first()
+            winner = VPS.objects.filter(order_token=order_token).first() if reserved_vps is None else None
             if winner:
                 return winner
             continue

@@ -147,7 +147,8 @@ class InternalProvisioningTests(TestCase):
     def test_background_worker_completes_existing_workflow(self):
         vps = VPS.objects.create(name="worker-vps", vmid=115, task_upid="mock-task")
         with patch("vps.management.commands.provision_vps.proxmox") as proxmox, \
-                patch("vps.management.commands.provision_vps.wait_for_task") as wait:
+                patch("vps.management.commands.provision_vps.wait_for_task") as wait, \
+                patch("vps.management.commands.provision_vps.wait_for_guest_ipv4", return_value="220.100.130.210"):
             vm = proxmox.nodes.return_value.qemu.return_value
             vm.config.get.return_value = {"scsi0": "local:disk,size=32G"}
             vm.status.current.get.return_value = {"status": "stopped"}
@@ -156,7 +157,7 @@ class InternalProvisioningTests(TestCase):
             wait.assert_any_call("mock-start")
             vm.status.start.post.assert_called_once()
         vps.refresh_from_db()
-        self.assertEqual((vps.status, vps.progress), ("Running", 100))
+        self.assertEqual((vps.status, vps.progress, vps.ip_address), ("Running", 100, "220.100.130.210"))
 
 
 @override_settings(BILLING_API_SECRET="test-only-shared-secret")

@@ -142,6 +142,42 @@ def wait_for_guest_ipv4(vmid, timeout=90, interval=3):
         time.sleep(interval)
     return None
 
+
+def get_vm_state(vmid):
+    """Return the Proxmox runtime state for a VM."""
+    result = proxmox.nodes(PROXMOX_NODE).qemu(vmid).status.current.get()
+    state = str(result.get("status", "")).strip().lower()
+    if state not in {"running", "stopped", "paused", "suspended"}:
+        return "unknown"
+    return state
+
+
+def perform_power_action(vmid, action):
+    """Submit a safe VPS power action and return the current state plus task."""
+    if action not in {"start", "shutdown", "reboot"}:
+        raise ValueError("Unsupported power action.")
+
+    vm = proxmox.nodes(PROXMOX_NODE).qemu(vmid)
+    state = get_vm_state(vmid)
+
+    if action == "start":
+        if state == "running":
+            return {"state": state, "task": None, "changed": False}
+        task = vm.status.start.post()
+        return {"state": state, "task": task, "changed": True}
+
+    if action == "shutdown":
+        if state == "stopped":
+            return {"state": state, "task": None, "changed": False}
+        task = vm.status.shutdown.post()
+        return {"state": state, "task": task, "changed": True}
+
+    if state != "running":
+        raise RuntimeError("VPS must be running before it can be rebooted.")
+    task = vm.status.reboot.post()
+    return {"state": state, "task": task, "changed": True}
+
+
 def clone_vps(name, vmid):
     """Start a clone and return immediately with the Proxmox UPID.
 

@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import re
 import time
@@ -90,6 +91,56 @@ def get_task_progress(task):
         # never abort the actual provisioning task.
         return None
 
+
+
+def get_guest_ipv4(vmid):
+    """Return the best non-loopback IPv4 reported by QEMU Guest Agent."""
+    try:
+        data = proxmox.nodes(PROXMOX_NODE).qemu(vmid).agent("network-get-interfaces").get()
+    except Exception:
+        # Guest-agent availability is eventually consistent after boot and is
+        # a UI/connection-detail enhancement, not a reason to fail the VPS.
+        return None
+
+    interfaces = data.get("result", []) if isinstance(data, dict) else data
+    if not isinstance(interfaces, list):
+        return None
+
+    addresses = []
+    for interface in interfaces:
+        if not isinstance(interface, dict) or interface.get("name") == "lo":
+            continue
+        for item in interface.get("ip-addresses", []):
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("ip-address")
+            if not isinstance(raw, str):
+                continue
+            try:
+                address = ipaddress.ip_address(raw)
+            except ValueError:
+                continue
+            if address.version != 4 or address.is_loopback or address.is_link_local:
+                continue
+            addresses.append(address)
+
+    if not addresses:
+        return None
+
+    # Prefer a globally routable address, then fall back to a private IPv4.
+    addresses.sort(key=lambda address: (not address.is_global, address.is_private, str(address)))
+    return str(addresses[0])
+
+
+def wait_for_guest_ipv4(vmid, timeout=90, interval=3):
+    """Wait briefly for QEMU Guest Agent/DHCP to report the guest IPv4."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        address = get_guest_ipv4(vmid)
+        if address:
+            return address
+        time.sleep(interval)
+    return None
 
 def clone_vps(name, vmid):
     """Start a clone and return immediately with the Proxmox UPID.

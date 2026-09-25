@@ -10,7 +10,7 @@ from django.utils.crypto import constant_time_compare
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import VPS
-from .proxmox import get_guest_ipv4
+from .proxmox import get_guest_ipv4, get_vm_state, perform_power_action
 from .views import _create_and_start_clone
 
 logger = logging.getLogger(__name__)
@@ -101,3 +101,68 @@ def status(request, billing_order_id):
         "vmid": vps.vmid, "status": vps.status, "progress": vps.progress,
         "current_step": vps.current_step, "ip_address": vps.ip_address,
         "error_message": "Provisioning failed. Contact the provisioning operator." if vps.error_message else ""})
+
+
+@authenticated("GET")
+def vps_state(request, billing_order_id):
+    vps = VPS.objects.filter(billing_order_id=billing_order_id).first()
+    if vps is None:
+        return JsonResponse({"error": "Order not found"}, status=404)
+    if not vps.vmid or vps.status != "Running":
+        return JsonResponse({"error": "VPS not ready"}, status=409)
+
+    try:
+        state = get_vm_state(vps.vmid)
+        if state == "running" and vps.ip_address == "0.0.0.0":
+            address = get_guest_ipv4(vps.vmid)
+            if address:
+                VPS.objects.filter(pk=vps.pk, ip_address="0.0.0.0").update(ip_address=address)
+                vps.ip_address = address
+    except Exception:
+        logger.exception("Runtime status failed for VPS %s", vps.pk)
+        return JsonResponse({"error": "Runtime status unavailable"}, status=502)
+
+    return JsonResponse({
+        "billing_order_id": vps.billing_order_id,
+        "vmid": vps.vmid,
+        "state": state,
+        "ip_address": vps.ip_address,
+    })
+
+
+@csrf_exempt
+@transaction.non_atomic_requests
+@authenticated("POST")
+def vps_power(request, billing_order_id):
+    vps = VPS.objects.filter(billing_order_id=billing_order_id).first()
+    if vps is None:
+        return JsonResponse({"error": "Order not found"}, status=404)
+    if not vps.vmid or vps.status != "Running":
+        return JsonResponse({"error": "VPS not ready"}, status=409)
+
+    try:
+        data = json.loads(request.body)
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return JsonResponse({"error": "Invalid request"}, status=400)
+    if not isinstance(data, dict) or set(data) != {"action"}:
+        return JsonResponse({"error": "Invalid request"}, status=400)
+
+    action = data.get("action")
+    if action not in {"start", "shutdown", "reboot"}:
+        return JsonResponse({"error": "Invalid power action"}, status=400)
+
+    try:
+        result = perform_power_action(vps.vmid, action)
+    except RuntimeError:
+        return JsonResponse({"error": "Power action conflicts with current state"}, status=409)
+    except Exception:
+        logger.exception("Power action failed for VPS %s", vps.pk)
+        return JsonResponse({"error": "Power action failed"}, status=502)
+
+    return JsonResponse({
+        "accepted": True,
+        "action": action,
+        "vmid": vps.vmid,
+        "state": result["state"],
+        "changed": bool(result["changed"]),
+    }, status=202 if result["changed"] else 200)

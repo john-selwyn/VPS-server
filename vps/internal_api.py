@@ -10,6 +10,7 @@ from django.utils.crypto import constant_time_compare
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import VPS
+from .proxmox import get_guest_ipv4
 from .views import _create_and_start_clone
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,13 @@ def status(request, billing_order_id):
     vps = VPS.objects.filter(billing_order_id=billing_order_id).first()
     if vps is None:
         return JsonResponse({"error": "Order not found"}, status=404)
+
+    if vps.status == "Running" and vps.vmid and vps.ip_address == "0.0.0.0":
+        address = get_guest_ipv4(vps.vmid)
+        if address:
+            VPS.objects.filter(pk=vps.pk, ip_address="0.0.0.0").update(ip_address=address)
+            vps.ip_address = address
+
     return JsonResponse({"billing_order_id": vps.billing_order_id, "vps_id": vps.pk,
         "vmid": vps.vmid, "status": vps.status, "progress": vps.progress,
         "current_step": vps.current_step, "ip_address": vps.ip_address,

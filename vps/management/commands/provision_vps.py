@@ -3,7 +3,7 @@ import re
 from django.core.management.base import BaseCommand, CommandError
 
 from vps.models import VPS
-from vps.proxmox import PROXMOX_NODE, get_task_progress, proxmox, wait_for_task
+from vps.proxmox import PROXMOX_NODE, get_task_progress, proxmox, wait_for_guest_ipv4, wait_for_task
 
 
 class Command(BaseCommand):
@@ -53,8 +53,8 @@ class Command(BaseCommand):
             if config.get("ide2"):
                 vm.config.set(delete="ide2")
 
-            update(82, "Configuring CPU and RAM")
-            vm.config.set(cores=vps.cpu, memory=vps.ram * 1024)
+            update(82, "Configuring CPU, RAM and guest agent")
+            vm.config.set(cores=vps.cpu, memory=vps.ram * 1024, agent=1)
 
             update(89, "Configuring storage")
             config = vm.config.get()
@@ -81,8 +81,19 @@ class Command(BaseCommand):
                 if start_task:
                     wait_for_task(start_task)
 
-            VPS.objects.filter(pk=vps.pk).update(status="Running", progress=100,
-                current_step="VPS is ready.", progress_message="VPS is ready.", error_message="")
+            update(98, "Obtaining IP address")
+            ip_address = wait_for_guest_ipv4(vps.vmid)
+            ready_message = "VPS is ready." if ip_address else "VPS is ready. IP address is still being assigned."
+            fields = {
+                "status": "Running",
+                "progress": 100,
+                "current_step": ready_message,
+                "progress_message": ready_message,
+                "error_message": "",
+            }
+            if ip_address:
+                fields["ip_address"] = ip_address
+            VPS.objects.filter(pk=vps.pk).update(**fields)
         except Exception as exc:
             VPS.objects.filter(pk=vps.pk).update(status="Failed", current_step="Provisioning failed.",
                 progress_message="Provisioning failed.", error_message=str(exc))

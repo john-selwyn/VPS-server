@@ -185,3 +185,85 @@ class ReservationCommitTests(TransactionTestCase):
             self.assertEqual(response.status_code, 202)
             helper.assert_called_once()
         self.assertEqual(VPS.objects.count(), 1)
+
+
+@override_settings(BILLING_API_SECRET="test-only-shared-secret")
+class InternalVPSControlTests(TestCase):
+    auth = {"HTTP_AUTHORIZATION": "Bearer test-only-shared-secret"}
+
+    def setUp(self):
+        self.client = Client(enforce_csrf_checks=True)
+        self.vps = VPS.objects.create(
+            name="managed-vps", billing_order_id=321, vmid=120,
+            status="Running", ip_address="220.100.130.210",
+        )
+        state_patcher = patch("vps.internal_api.get_vm_state", return_value="running")
+        power_patcher = patch(
+            "vps.internal_api.perform_power_action",
+            return_value={"state": "running", "task": "mock-upid", "changed": True},
+        )
+        guest_patcher = patch("vps.internal_api.get_guest_ipv4", return_value="220.100.130.210")
+        self.get_vm_state = state_patcher.start()
+        self.perform_power_action = power_patcher.start()
+        self.get_guest_ipv4 = guest_patcher.start()
+        self.addCleanup(state_patcher.stop)
+        self.addCleanup(power_patcher.stop)
+        self.addCleanup(guest_patcher.stop)
+
+    def test_runtime_status_requires_internal_auth_and_returns_safe_state(self):
+        url = "/api/internal/vps/321/"
+        self.assertEqual(self.client.get(url).status_code, 401)
+        response = self.client.get(url, **self.auth)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "billing_order_id": 321,
+            "vmid": 120,
+            "state": "running",
+            "ip_address": "220.100.130.210",
+        })
+        self.get_vm_state.assert_called_once_with(120)
+
+    def test_runtime_status_requires_existing_ready_vps(self):
+        self.assertEqual(self.client.get("/api/internal/vps/999/", **self.auth).status_code, 404)
+        self.vps.status = "Provisioning"
+        self.vps.save(update_fields=["status"])
+        self.assertEqual(self.client.get("/api/internal/vps/321/", **self.auth).status_code, 409)
+        self.get_vm_state.assert_not_called()
+
+    def test_power_action_requires_auth_and_whitelisted_action(self):
+        url = "/api/internal/vps/321/power/"
+        self.assertEqual(
+            self.client.post(url, json.dumps({"action": "shutdown"}), content_type="application/json").status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.post(url, json.dumps({"action": "destroy"}), content_type="application/json", **self.auth).status_code,
+            400,
+        )
+        self.perform_power_action.assert_not_called()
+
+    def test_power_action_is_forwarded_by_billing_order_not_browser_vmid(self):
+        url = "/api/internal/vps/321/power/"
+        response = self.client.post(
+            url, json.dumps({"action": "shutdown"}), content_type="application/json", **self.auth
+        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["action"], "shutdown")
+        self.assertEqual(response.json()["vmid"], 120)
+        self.perform_power_action.assert_called_once_with(120, "shutdown")
+
+    def test_power_conflict_and_remote_failure_do_not_leak_details(self):
+        url = "/api/internal/vps/321/power/"
+        self.perform_power_action.side_effect = RuntimeError("private state detail")
+        response = self.client.post(
+            url, json.dumps({"action": "reboot"}), content_type="application/json", **self.auth
+        )
+        self.assertEqual(response.status_code, 409)
+        self.assertNotIn("private state detail", response.content.decode())
+
+        self.perform_power_action.side_effect = Exception("private Proxmox detail")
+        response = self.client.post(
+            url, json.dumps({"action": "start"}), content_type="application/json", **self.auth
+        )
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn("private Proxmox detail", response.content.decode())

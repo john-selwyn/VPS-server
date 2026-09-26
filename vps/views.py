@@ -41,17 +41,25 @@ def _start_worker(vps_id):
 
 
 def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
-    """Reserve a VMID and submit Proxmox's asynchronous clone request."""
+    """Durably reserve VMID/IP first, then submit one Proxmox clone request."""
+    vps = None
     for _ in range(3):
         try:
             with transaction.atomic():
                 reserved_vmids = VPS.objects.exclude(vmid__isnull=True).values_list("vmid", flat=True)
                 vmid = get_next_vmid(reserved_vmids)
-                if reserved_vps is not None and str(reserved_vps.ip_address) != "0.0.0.0":
-                    assigned_ip = str(reserved_vps.ip_address)
-                else:
+
+                if reserved_vps is None:
                     reserved_ips = VPS.objects.exclude(ip_address="0.0.0.0").values_list("ip_address", flat=True)
                     assigned_ip = next_available_ip(reserved_ips)
+                else:
+                    vps = VPS.objects.select_for_update().get(pk=reserved_vps.pk)
+                    if str(vps.ip_address) != "0.0.0.0":
+                        assigned_ip = str(vps.ip_address)
+                    else:
+                        reserved_ips = VPS.objects.exclude(ip_address="0.0.0.0").values_list("ip_address", flat=True)
+                        assigned_ip = next_available_ip(reserved_ips)
+
                 fields = dict(
                     name=configuration["name"], vmid=vmid, ip_address=assigned_ip,
                     status="Provisioning", progress=1,
@@ -60,35 +68,46 @@ def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
                     operating_system=configuration["os"], billing_cycle=configuration["billing"],
                     plan=configuration.get("plan", f'{configuration["ram"]}GB VPS'), order_token=order_token,
                 )
+
                 if reserved_vps is None:
                     vps = VPS.objects.create(**fields)
                 else:
-                    vps = VPS.objects.get(pk=reserved_vps.pk)
                     for field, value in fields.items():
                         setattr(vps, field, value)
                     vps.save(update_fields=list(fields))
-                try:
-                    result = clone_vps(vps.name, vmid)
-                except Exception as exc:
-                    vps.status = "Failed"
-                    vps.current_step = "Provisioning failed."
-                    vps.progress_message = vps.current_step
-                    vps.error_message = str(exc)
-                    vps.save(update_fields=["status", "current_step", "progress_message", "error_message"])
-                    return vps
-                vps.task_upid = result["task"]
-                vps.progress = 5
-                vps.current_step = "Cloning template"
-                vps.progress_message = "Cloning template"
-                vps.save(update_fields=["task_upid", "progress", "current_step", "progress_message"])
-                transaction.on_commit(lambda: _start_worker(vps.id))
-                return vps
+            break
         except IntegrityError:
             winner = VPS.objects.filter(order_token=order_token).first() if reserved_vps is None else None
             if winner:
                 return winner
+            vps = None
             continue
-    raise RuntimeError("Could not reserve an available VMID; please try again.")
+
+    if vps is None:
+        raise RuntimeError("Could not reserve an available VMID/IP; please try again.")
+
+    # The VMID and customer IP are committed before any external side effect.
+    try:
+        result = clone_vps(vps.name, vps.vmid)
+    except Exception as exc:
+        VPS.objects.filter(pk=vps.pk).update(
+            status="Failed",
+            current_step="Provisioning failed.",
+            progress_message="Provisioning failed.",
+            error_message=str(exc),
+        )
+        vps.refresh_from_db()
+        return vps
+
+    VPS.objects.filter(pk=vps.pk).update(
+        task_upid=result["task"],
+        progress=5,
+        current_step="Cloning template",
+        progress_message="Cloning template",
+    )
+    _start_worker(vps.id)
+    vps.refresh_from_db()
+    return vps
 
 
 def order_vps(request):

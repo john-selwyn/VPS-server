@@ -128,6 +128,21 @@ class InternalProvisioningTests(TestCase):
         self.assertEqual(Client().post(url, **self.auth).status_code, 405)
         self.clone_vps.assert_not_called()
 
+    def test_vm_and_ip_reservation_are_committed_before_clone_submission(self):
+        def clone(name, vmid):
+            from django.db import connection
+            self.assertFalse(connection.in_atomic_block)
+            reserved = VPS.objects.get(billing_order_id=123)
+            self.assertEqual(reserved.vmid, vmid)
+            self.assertEqual(reserved.ip_address, "220.100.130.211")
+            return {"task": "mock-task"}
+
+        self.clone_vps.side_effect = clone
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.post(**self.auth)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(VPS.objects.get(billing_order_id=123).ip_address, "220.100.130.211")
+
     def test_browser_workflow(self):
         browser = Client()
         response = browser.post("/order/", {"name": "browser-vps", "cpu": 2, "ram": 4,

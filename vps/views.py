@@ -8,6 +8,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .models import VPS
+from .networking import next_available_ip
 from .proxmox import clone_vps, get_next_vmid
 
 
@@ -44,10 +45,16 @@ def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
     for _ in range(3):
         try:
             with transaction.atomic():
-                reserved = VPS.objects.exclude(vmid__isnull=True).values_list("vmid", flat=True)
-                vmid = get_next_vmid(reserved)
+                reserved_vmids = VPS.objects.exclude(vmid__isnull=True).values_list("vmid", flat=True)
+                vmid = get_next_vmid(reserved_vmids)
+                if reserved_vps is not None and str(reserved_vps.ip_address) != "0.0.0.0":
+                    assigned_ip = str(reserved_vps.ip_address)
+                else:
+                    reserved_ips = VPS.objects.exclude(ip_address="0.0.0.0").values_list("ip_address", flat=True)
+                    assigned_ip = next_available_ip(reserved_ips)
                 fields = dict(
-                    name=configuration["name"], vmid=vmid, status="Provisioning", progress=1,
+                    name=configuration["name"], vmid=vmid, ip_address=assigned_ip,
+                    status="Provisioning", progress=1,
                     current_step="Preparing VPS", progress_message="Preparing VPS",
                     cpu=configuration["cpu"], ram=configuration["ram"], storage=configuration["storage"],
                     operating_system=configuration["os"], billing_cycle=configuration["billing"],

@@ -1,9 +1,10 @@
 import re
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from vps.models import VPS
-from vps.proxmox import PROXMOX_NODE, get_task_progress, proxmox, wait_for_guest_ipv4, wait_for_task
+from vps.proxmox import PROXMOX_NODE, get_task_progress, proxmox, wait_for_task
 
 
 class Command(BaseCommand):
@@ -53,10 +54,18 @@ class Command(BaseCommand):
             if config.get("ide2"):
                 vm.config.set(delete="ide2")
 
-            update(82, "Configuring CPU, RAM and guest agent")
+            update(80, "Configuring CPU, RAM and guest agent")
             vm.config.set(cores=vps.cpu, memory=vps.ram * 1024, agent=1)
 
-            update(89, "Configuring storage")
+            if not vps.ip_address or str(vps.ip_address) == "0.0.0.0":
+                raise RuntimeError("No static IP address was reserved for this VPS.")
+            update(85, "Configuring static network")
+            vm.config.set(
+                ipconfig0=f"ip={vps.ip_address}/{settings.VPS_IP_PREFIX},gw={settings.VPS_IP_GATEWAY}",
+                nameserver=str(settings.VPS_IP_DNS),
+            )
+
+            update(90, "Configuring storage")
             config = vm.config.get()
             # `scsihw` describes the controller, not a disk. Proxmox's resize
             # API accepts only numbered disk slots (for example, scsi0).
@@ -81,19 +90,14 @@ class Command(BaseCommand):
                 if start_task:
                     wait_for_task(start_task)
 
-            update(98, "Obtaining IP address")
-            ip_address = wait_for_guest_ipv4(vps.vmid)
-            ready_message = "VPS is ready." if ip_address else "VPS is ready. IP address is still being assigned."
-            fields = {
-                "status": "Running",
-                "progress": 100,
-                "current_step": ready_message,
-                "progress_message": ready_message,
-                "error_message": "",
-            }
-            if ip_address:
-                fields["ip_address"] = ip_address
-            VPS.objects.filter(pk=vps.pk).update(**fields)
+            ready_message = "VPS is ready."
+            VPS.objects.filter(pk=vps.pk).update(
+                status="Running",
+                progress=100,
+                current_step=ready_message,
+                progress_message=ready_message,
+                error_message="",
+            )
         except Exception as exc:
             VPS.objects.filter(pk=vps.pk).update(status="Failed", current_step="Provisioning failed.",
                 progress_message="Provisioning failed.", error_message=str(exc))

@@ -12,6 +12,11 @@ with patch.dict(os.environ, {
     "VPS_DB_PASSWORD": "test-only-unused-password",
     "VPS_DB_HOST": "database.invalid",
     "VPS_DB_PORT": "5432",
+    "VPS_IP_POOL_START": "220.100.130.211",
+    "VPS_IP_POOL_END": "220.100.130.213",
+    "VPS_IP_PREFIX": "24",
+    "VPS_IP_GATEWAY": "220.100.130.254",
+    "VPS_IP_DNS": "8.8.8.8",
 }):
     from .settings import *  # noqa: F403
 
@@ -25,5 +30,5 @@ os.environ.update({
     "PROXMOX_TOKEN_NAME": "test-only-token",
     "PROXMOX_TOKEN_SECRET": "test-only-secret",
     "PROXMOX_NODE": "test-1",
-    "VPS_TEMPLATE_VMID": "101",
+    "VPS_TEMPLATE_VMID": "104",
 })

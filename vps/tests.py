@@ -6,6 +6,7 @@ from django.core.management import call_command
 from django.test import Client, TestCase, TransactionTestCase, override_settings
 
 from .models import VPS
+from .networking import IPPoolExhausted, next_available_ip
 
 
 @override_settings(BILLING_API_SECRET="test-only-shared-secret")
@@ -81,6 +82,7 @@ class InternalProvisioningTests(TestCase):
         self.assertEqual(response.json(), {"success": True, "vps_id": vps.pk,
                                           "vmid": 115, "status": "Provisioning"})
         self.assertEqual((vps.cpu, vps.ram, vps.storage, vps.plan), (2, 4, 50, "VPS Starter"))
+        self.assertEqual(vps.ip_address, "220.100.130.211")
         self._start_worker.assert_called_once_with(vps.pk)
         retry = self.post(**self.auth)
         self.assertEqual(retry.status_code, 200)
@@ -146,9 +148,10 @@ class InternalProvisioningTests(TestCase):
 
     def test_background_worker_completes_existing_workflow(self):
         vps = VPS.objects.create(name="worker-vps", vmid=115, task_upid="mock-task")
+        vps.ip_address = "220.100.130.211"
+        vps.save(update_fields=["ip_address"])
         with patch("vps.management.commands.provision_vps.proxmox") as proxmox, \
-                patch("vps.management.commands.provision_vps.wait_for_task") as wait, \
-                patch("vps.management.commands.provision_vps.wait_for_guest_ipv4", return_value="220.100.130.210"):
+                patch("vps.management.commands.provision_vps.wait_for_task") as wait:
             vm = proxmox.nodes.return_value.qemu.return_value
             vm.config.get.return_value = {"scsi0": "local:disk,size=32G"}
             vm.status.current.get.return_value = {"status": "stopped"}
@@ -157,7 +160,11 @@ class InternalProvisioningTests(TestCase):
             wait.assert_any_call("mock-start")
             vm.status.start.post.assert_called_once()
         vps.refresh_from_db()
-        self.assertEqual((vps.status, vps.progress, vps.ip_address), ("Running", 100, "220.100.130.210"))
+        self.assertEqual((vps.status, vps.progress, vps.ip_address), ("Running", 100, "220.100.130.211"))
+        vm.config.set.assert_any_call(
+            ipconfig0="ip=220.100.130.211/24,gw=220.100.130.254",
+            nameserver="8.8.8.8",
+        )
 
 
 @override_settings(BILLING_API_SECRET="test-only-shared-secret")
@@ -185,3 +192,24 @@ class ReservationCommitTests(TransactionTestCase):
             self.assertEqual(response.status_code, 202)
             helper.assert_called_once()
         self.assertEqual(VPS.objects.count(), 1)
+
+
+class StaticIPAllocationTests(TestCase):
+    def test_allocator_skips_reserved_addresses(self):
+        self.assertEqual(next_available_ip([]), "220.100.130.211")
+        self.assertEqual(next_available_ip(["220.100.130.211"]), "220.100.130.212")
+
+    def test_allocator_fails_closed_when_pool_is_exhausted(self):
+        with self.assertRaises(IPPoolExhausted):
+            next_available_ip([
+                "220.100.130.211",
+                "220.100.130.212",
+                "220.100.130.213",
+            ])
+
+    def test_non_placeholder_vps_ips_are_unique(self):
+        VPS.objects.create(name="one", ip_address="220.100.130.211")
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            VPS.objects.create(name="two", ip_address="220.100.130.211")
+        VPS.objects.create(name="placeholder-one")
+        VPS.objects.create(name="placeholder-two")

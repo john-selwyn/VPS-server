@@ -33,6 +33,15 @@ class VPS(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["ip_address"],
+                condition=~models.Q(ip_address="0.0.0.0"),
+                name="unique_allocated_vps_ip",
+            ),
+        ]
+
     def __str__(self):
         return self.name
 

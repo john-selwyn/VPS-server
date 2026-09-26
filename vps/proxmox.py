@@ -14,16 +14,26 @@ PROXMOX_HOST = os.getenv("PROXMOX_HOST")
 PROXMOX_USER = os.getenv("PROXMOX_USER")
 PROXMOX_TOKEN_NAME = os.getenv("PROXMOX_TOKEN_NAME")
 PROXMOX_TOKEN_SECRET = os.getenv("PROXMOX_TOKEN_SECRET")
+PROXMOX_NODE = os.getenv("PROXMOX_NODE", "").strip()
+VPS_TEMPLATE_VMID_RAW = os.getenv("VPS_TEMPLATE_VMID", "").strip()
 
-PROXMOX_NODE = "test-1"
-VPS_TEMPLATE_VMID = 101
+if not all((
+    PROXMOX_HOST, PROXMOX_USER, PROXMOX_TOKEN_NAME, PROXMOX_TOKEN_SECRET,
+    PROXMOX_NODE, VPS_TEMPLATE_VMID_RAW,
+)):
+    raise RuntimeError("Proxmox connection and target configuration must be set with environment variables.")
 
-if not all((PROXMOX_HOST, PROXMOX_USER, PROXMOX_TOKEN_NAME, PROXMOX_TOKEN_SECRET)):
-    raise RuntimeError("Proxmox credentials must be configured with environment variables.")
+try:
+    VPS_TEMPLATE_VMID = int(VPS_TEMPLATE_VMID_RAW)
+except ValueError as exc:
+    raise RuntimeError("VPS_TEMPLATE_VMID must be a positive integer.") from exc
+if VPS_TEMPLATE_VMID <= 0:
+    raise RuntimeError("VPS_TEMPLATE_VMID must be a positive integer.")
 
 proxmox = ProxmoxAPI(
     PROXMOX_HOST, user=PROXMOX_USER, token_name=PROXMOX_TOKEN_NAME,
-    token_value=PROXMOX_TOKEN_SECRET, verify_ssl=False, timeout=30,
+    token_value=PROXMOX_TOKEN_SECRET,
+    verify_ssl=os.getenv("PROXMOX_CA_BUNDLE") or True, timeout=30,
 )
 
 
@@ -143,39 +153,106 @@ def wait_for_guest_ipv4(vmid, timeout=90, interval=3):
     return None
 
 
-def get_vm_state(vmid):
-    """Return the Proxmox runtime state for a VM."""
-    result = proxmox.nodes(PROXMOX_NODE).qemu(vmid).status.current.get()
-    state = str(result.get("status", "")).strip().lower()
-    if state not in {"running", "stopped", "paused", "suspended"}:
+class InvalidProxmoxResponse(ValueError):
+    pass
+
+
+def resolve_vm_node(vmid):
+    """Resolve a QEMU VM's current cluster node and reject ambiguous responses."""
+    if type(vmid) is not int or vmid <= 0:
+        raise ValueError("Invalid VMID.")
+    resources = proxmox.cluster.resources.get(type="vm")
+    if not isinstance(resources, list):
+        raise InvalidProxmoxResponse("Invalid cluster resource response.")
+
+    matches = []
+    for resource in resources:
+        if not isinstance(resource, dict) or resource.get("type") != "qemu":
+            continue
+        try:
+            resource_vmid = int(resource.get("vmid"))
+        except (TypeError, ValueError):
+            continue
+        if resource_vmid != vmid:
+            continue
+        node = resource.get("node")
+        if not isinstance(node, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]{0,254}", node):
+            raise InvalidProxmoxResponse("Invalid VM node response.")
+        matches.append(node)
+
+    if len(matches) != 1:
+        raise InvalidProxmoxResponse("VM node could not be resolved uniquely.")
+    return matches[0]
+
+
+def get_vm_state(vmid, *, node=PROXMOX_NODE):
+    """Validate the process status and the more precise QMP run state."""
+    result = proxmox.nodes(node).qemu(vmid).status.current.get()
+    if not isinstance(result, dict) or not isinstance(result.get("status"), str):
+        raise InvalidProxmoxResponse("Invalid runtime response.")
+    state = result["status"]
+    qmp = result.get("qmpstatus")
+    if "qmpstatus" in result and not isinstance(qmp, str):
+        raise InvalidProxmoxResponse("Invalid QMP state.")
+    lock = result.get("lock")
+    if "lock" in result and not isinstance(lock, str):
+        raise InvalidProxmoxResponse("Invalid VM lock.")
+    # Suspend-to-disk has no running QEMU process, but is not an ordinary stop.
+    if lock == "suspended":
+        return "suspended"
+    if lock:
         return "unknown"
-    return state
+    if state not in {"running", "stopped", "paused", "suspended", "unknown"}:
+        return "unknown"
+    if qmp is None:
+        return state
+    if state == "running":
+        return {"running": "running", "paused": "paused", "suspended": "suspended"}.get(qmp, "unknown")
+    if state == "stopped":
+        return "stopped" if qmp == "stopped" else "unknown"
+    return state if qmp == state else "unknown"
 
 
-def perform_power_action(vmid, action):
-    """Submit a safe VPS power action and return the current state plus task."""
-    if action not in {"start", "shutdown", "reboot"}:
+def validate_power_upid(task, vmid, action, node):
+    # UPID:<node>:<pid hex>:<process start hex>:<start hex>:<type>:<id>:<user>:
+    if not isinstance(task, str) or len(task) > 1024:
+        raise InvalidProxmoxResponse("Invalid power task.")
+    match = re.fullmatch(r"UPID:([^:\s]+):([0-9A-Fa-f]{8,}):([0-9A-Fa-f]{8,}):([0-9A-Fa-f]{8,}):([^:\s]+):([0-9]+):([^:\s]+):", task)
+    task_types = {
+        "start": {"qmstart", "hastart"},
+        "shutdown": {"qmshutdown", "hastop"},
+        "reboot": {"qmreboot"},
+    }
+    if not match or match[1] != node or match[5] not in task_types[action] or match[6] != str(vmid):
+        raise InvalidProxmoxResponse("Invalid power task.")
+    return task
+
+
+def submit_power_action(vmid, action, *, node=PROXMOX_NODE):
+    """One submission only. Caller must durably record the ambiguous window first."""
+    if not isinstance(action, str) or action not in {"start", "shutdown", "reboot"}:
         raise ValueError("Unsupported power action.")
-
-    vm = proxmox.nodes(PROXMOX_NODE).qemu(vmid)
-    state = get_vm_state(vmid)
-
+    vm = proxmox.nodes(node).qemu(vmid)
     if action == "start":
-        if state == "running":
-            return {"state": state, "task": None, "changed": False}
         task = vm.status.start.post()
-        return {"state": state, "task": task, "changed": True}
+    elif action == "shutdown":
+        task = vm.status.shutdown.post(timeout=120, forceStop=0)
+    else:
+        task = vm.status.reboot.post(timeout=120)
+    # Do not retry with different parameters if an older server rejects these.
+    return validate_power_upid(task, vmid, action, node)
 
-    if action == "shutdown":
-        if state == "stopped":
-            return {"state": state, "task": None, "changed": False}
-        task = vm.status.shutdown.post()
-        return {"state": state, "task": task, "changed": True}
 
-    if state != "running":
-        raise RuntimeError("VPS must be running before it can be rebooted.")
-    task = vm.status.reboot.post()
-    return {"state": state, "task": task, "changed": True}
+def get_power_task_status(task, *, node=PROXMOX_NODE):
+    """Return only running/succeeded/failed; never propagate upstream error text."""
+    result = proxmox.nodes(node).tasks(task).status.get()
+    if not isinstance(result, dict):
+        raise InvalidProxmoxResponse("Invalid task response.")
+    if result.get("status") == "running" and "exitstatus" not in result:
+        return "running"
+    if result.get("status") == "stopped" and isinstance(result.get("exitstatus"), str) and result["exitstatus"]:
+        return "succeeded" if result["exitstatus"] == "OK" else "failed"
+    raise InvalidProxmoxResponse("Invalid task response.")
 
 
 def clone_vps(name, vmid):

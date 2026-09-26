@@ -1,33 +1,37 @@
 """Authenticated billing integration; provisioning remains owned by views/worker."""
 import json
 import logging
+import uuid
 from functools import wraps
 
 from django.conf import settings
 from django.db import transaction
 from django.http import JsonResponse
 from django.utils.crypto import constant_time_compare
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from .models import VPS
-from .proxmox import get_guest_ipv4, get_vm_state, perform_power_action
+from .models import VPS, PowerOperation
+from .proxmox import get_guest_ipv4, get_vm_state, resolve_vm_node
+from .power import AdmissionError, admit_power
+from .power_contract import error_response, json_response, operation_response
 from .views import _create_and_start_clone
 
 logger = logging.getLogger(__name__)
 
 
-def authenticated(method):
+def authenticated(method, *, versioned=False):
     def decorate(view):
         @wraps(view)
         def wrapped(request, *args, **kwargs):
             secret = settings.BILLING_API_SECRET
             scheme, _, token = request.headers.get("Authorization", "").partition(" ")
             if not secret or scheme.lower() != "bearer" or not constant_time_compare(token, secret):
-                response = JsonResponse({"error": "Unauthorized"}, status=401)
+                response = error_response("UNAUTHORIZED", 401) if versioned else JsonResponse({"error": "Unauthorized"}, status=401)
                 response["WWW-Authenticate"] = "Bearer"
                 return response
             if request.method != method:
-                response = JsonResponse({"error": "Method not allowed"}, status=405)
+                response = error_response("METHOD_NOT_ALLOWED", 405) if versioned else JsonResponse({"error": "Method not allowed"}, status=405)
                 response["Allow"] = method
                 return response
             return view(request, *args, **kwargs)
@@ -103,66 +107,76 @@ def status(request, billing_order_id):
         "error_message": "Provisioning failed. Contact the provisioning operator." if vps.error_message else ""})
 
 
-@authenticated("GET")
+@csrf_exempt
+@authenticated("GET", versioned=True)
 def vps_state(request, billing_order_id):
+    if not 0 < billing_order_id <= 9223372036854775807 or request.GET:
+        return error_response("INVALID_REQUEST", 400)
     vps = VPS.objects.filter(billing_order_id=billing_order_id).first()
     if vps is None:
-        return JsonResponse({"error": "Order not found"}, status=404)
+        return error_response("NOT_FOUND", 404, billing_order_id=billing_order_id)
     if not vps.vmid or vps.status != "Running":
-        return JsonResponse({"error": "VPS not ready"}, status=409)
+        return error_response("VPS_NOT_READY", 409, billing_order_id=billing_order_id)
 
     try:
-        state = get_vm_state(vps.vmid)
-        if state == "running" and vps.ip_address == "0.0.0.0":
-            address = get_guest_ipv4(vps.vmid)
-            if address:
-                VPS.objects.filter(pk=vps.pk, ip_address="0.0.0.0").update(ip_address=address)
-                vps.ip_address = address
+        node = resolve_vm_node(vps.vmid)
+        state = get_vm_state(vps.vmid, node=node)
+        if state not in PowerOperation.STATES:
+            raise ValueError("Invalid runtime state.")
     except Exception:
-        logger.exception("Runtime status failed for VPS %s", vps.pk)
-        return JsonResponse({"error": "Runtime status unavailable"}, status=502)
+        return error_response("RUNTIME_UNAVAILABLE", 502, billing_order_id=billing_order_id)
 
-    return JsonResponse({
+    return json_response({
+        "version": 1,
         "billing_order_id": vps.billing_order_id,
-        "vmid": vps.vmid,
         "state": state,
+        "observed_at": timezone.now().isoformat(),
         "ip_address": vps.ip_address,
     })
 
 
 @csrf_exempt
 @transaction.non_atomic_requests
-@authenticated("POST")
+@authenticated("POST", versioned=True)
 def vps_power(request, billing_order_id):
-    vps = VPS.objects.filter(billing_order_id=billing_order_id).first()
-    if vps is None:
-        return JsonResponse({"error": "Order not found"}, status=404)
-    if not vps.vmid or vps.status != "Running":
-        return JsonResponse({"error": "VPS not ready"}, status=409)
-
+    if not 0 < billing_order_id <= 9223372036854775807 or request.GET or request.content_type != "application/json":
+        return error_response("INVALID_REQUEST", 400)
     try:
-        data = json.loads(request.body)
+        key_text = request.headers.get("Idempotency-Key", "")
+        key = uuid.UUID(key_text)
+        if str(key) != key_text.lower():
+            raise ValueError("Noncanonical UUID.")
+        data = json.loads(request.body, object_pairs_hook=_unique_json_object)
     except (ValueError, UnicodeDecodeError, RecursionError):
-        return JsonResponse({"error": "Invalid request"}, status=400)
+        return error_response("INVALID_REQUEST", 400, billing_order_id=billing_order_id)
     if not isinstance(data, dict) or set(data) != {"action"}:
-        return JsonResponse({"error": "Invalid request"}, status=400)
-
+        return error_response("INVALID_REQUEST", 400, billing_order_id=billing_order_id)
     action = data.get("action")
-    if action not in {"start", "shutdown", "reboot"}:
-        return JsonResponse({"error": "Invalid power action"}, status=400)
-
+    if not isinstance(action, str) or action not in PowerOperation.ACTIONS:
+        return error_response("INVALID_REQUEST", 400, billing_order_id=billing_order_id)
     try:
-        result = perform_power_action(vps.vmid, action)
-    except RuntimeError:
-        return JsonResponse({"error": "Power action conflicts with current state"}, status=409)
-    except Exception:
-        logger.exception("Power action failed for VPS %s", vps.pk)
-        return JsonResponse({"error": "Power action failed"}, status=502)
+        operation = admit_power(billing_order_id, action, key)
+    except AdmissionError as exc:
+        return error_response(exc.code, exc.status, billing_order_id=billing_order_id,
+                              active_operation_id=exc.active_operation_id)
+    return operation_response(operation)
 
-    return JsonResponse({
-        "accepted": True,
-        "action": action,
-        "vmid": vps.vmid,
-        "state": result["state"],
-        "changed": bool(result["changed"]),
-    }, status=202 if result["changed"] else 200)
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate JSON field.")
+        result[key] = value
+    return result
+
+
+@csrf_exempt
+@authenticated("GET", versioned=True)
+def power_operation(request, billing_order_id, operation_id):
+    if not 0 < billing_order_id <= 9223372036854775807 or request.GET:
+        return error_response("INVALID_REQUEST", 400)
+    operation = PowerOperation.objects.filter(billing_order_id=billing_order_id, pk=operation_id).first()
+    if operation is None:
+        return error_response("NOT_FOUND", 404, billing_order_id=billing_order_id)
+    return operation_response(operation)

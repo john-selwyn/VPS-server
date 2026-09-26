@@ -35,3 +35,46 @@ class VPS(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class PowerOperation(models.Model):
+    """Durable command reservation. Never delete keys to make a retry executable."""
+
+    ACTIONS = ("start", "shutdown", "reboot")
+    STATUSES = ("pending", "running", "succeeded", "failed", "unknown")
+    UNRESOLVED = ("pending", "running", "unknown")
+    STATES = ("running", "stopped", "paused", "suspended", "unknown")
+
+    operation_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    idempotency_key = models.UUIDField(unique=True, editable=False)
+    vps = models.ForeignKey(VPS, on_delete=models.PROTECT, related_name="power_operations")
+    # Customer-independent targets resolved by VM100, never supplied by the caller.
+    billing_order_id = models.PositiveBigIntegerField()
+    target_vmid = models.PositiveIntegerField()
+    target_node = models.CharField(max_length=255)
+    action = models.CharField(max_length=8, choices=[(x, x) for x in ACTIONS])
+    status = models.CharField(max_length=9, default="pending", choices=[(x, x) for x in STATUSES])
+    result = models.CharField(max_length=8, null=True, default=None, choices=[("executed", "executed"), ("noop", "noop")])
+    observed_state = models.CharField(max_length=9, default="unknown", choices=[(x, x) for x in STATES])
+    observed_at = models.DateTimeField(null=True)
+    task_upid = models.TextField(blank=True, default="")
+    error_code = models.CharField(max_length=40, blank=True, default="")
+    claimed_at = models.DateTimeField(null=True)
+    submission_started_at = models.DateTimeField(null=True)
+    poll_claimed_at = models.DateTimeField(null=True)
+    next_poll_at = models.DateTimeField(null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["status", "updated_at"], name="power_work_idx"),
+            models.Index(fields=["status", "next_poll_at"], name="power_poll_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(fields=["vps"], condition=models.Q(status__in=("pending", "running", "unknown")), name="one_unresolved_power_per_vps"),
+            models.CheckConstraint(condition=models.Q(action__in=("start", "shutdown", "reboot")), name="power_valid_action"),
+            models.CheckConstraint(condition=models.Q(status__in=("pending", "running", "succeeded", "failed", "unknown")), name="power_valid_status"),
+            models.CheckConstraint(condition=models.Q(observed_state__in=("running", "stopped", "paused", "suspended", "unknown")), name="power_valid_state"),
+            models.CheckConstraint(condition=(models.Q(status="succeeded", result__isnull=False, result__in=("executed", "noop")) | (~models.Q(status="succeeded") & models.Q(result__isnull=True))), name="power_result_matches_status"),
+        ]

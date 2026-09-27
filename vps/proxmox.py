@@ -4,6 +4,8 @@ import re
 import time
 from pathlib import Path
 
+import requests
+
 from dotenv import load_dotenv
 from proxmoxer import ProxmoxAPI
 
@@ -320,9 +322,31 @@ def clone_vps(name, vmid, *, template_vmid=None):
     }
 
 
-def wait_for_task(task, progress_callback=None):
+def wait_for_task(task, progress_callback=None, *, transport_attempts=8):
+    """Wait for one already-submitted Proxmox task without ever resubmitting it.
+
+    Short transport failures are retried against the same UPID. This is safe for
+    clone/start/resize monitoring because only the read-only task-status request
+    is repeated; the underlying Proxmox operation is never submitted again.
+    """
+    failures = 0
+
     while True:
-        result = proxmox.nodes(PROXMOX_NODE).tasks(task).status.get()
+        try:
+            result = proxmox.nodes(PROXMOX_NODE).tasks(task).status.get()
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            failures += 1
+            if failures >= transport_attempts:
+                raise
+
+            if progress_callback:
+                progress_callback(5, "Proxmox API connection interrupted; reconciling existing task.")
+
+            # Bounded exponential backoff: 1, 2, 4, then at most 8 seconds.
+            time.sleep(min(2 ** (failures - 1), 8))
+            continue
+
+        failures = 0
 
         if result.get("status") == "stopped":
             if result.get("exitstatus") == "OK":

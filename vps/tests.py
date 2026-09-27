@@ -1,5 +1,7 @@
 import json
-from unittest.mock import patch
+
+import requests
+from unittest.mock import Mock, patch
 
 from django.db import IntegrityError, transaction
 from django.core.management import call_command
@@ -7,6 +9,27 @@ from django.test import Client, TestCase, TransactionTestCase, override_settings
 
 from .models import VPS
 from .networking import IPPoolExhausted, next_available_ip
+from .proxmox import wait_for_task
+
+
+class ProxmoxTaskRecoveryTests(TestCase):
+    def test_wait_for_task_recovers_from_connection_reset_without_resubmission(self):
+        endpoint = Mock()
+        endpoint.status.get.side_effect = [
+            requests.exceptions.ConnectionError(
+                "Connection aborted.",
+                ConnectionResetError(104, "Connection reset by peer"),
+            ),
+            {"status": "stopped", "exitstatus": "OK"},
+        ]
+        client = Mock()
+        client.nodes.return_value.tasks.return_value = endpoint
+
+        with patch("vps.proxmox.proxmox", client), patch("vps.proxmox.time.sleep") as sleep:
+            self.assertTrue(wait_for_task("UPID:test-task"))
+
+        self.assertEqual(endpoint.status.get.call_count, 2)
+        sleep.assert_called_once_with(1)
 
 
 @override_settings(BILLING_API_SECRET="test-only-shared-secret")

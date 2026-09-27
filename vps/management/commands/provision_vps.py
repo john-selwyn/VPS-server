@@ -4,7 +4,14 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from vps.models import VPS
-from vps.proxmox import PROXMOX_NODE, get_task_progress, proxmox, wait_for_task
+from vps.proxmox import (
+    PROXMOX_NODE,
+    get_task_progress,
+    proxmox,
+    resolve_vm_node,
+    wait_for_guest_ipv4_match,
+    wait_for_task,
+)
 
 
 class Command(BaseCommand):
@@ -89,6 +96,17 @@ class Command(BaseCommand):
                 start_task = vm.status.start.post()
                 if start_task:
                     wait_for_task(start_task)
+
+            update(98, "Verifying guest network")
+            node = resolve_vm_node(vps.vmid)
+            if not wait_for_guest_ipv4_match(
+                vps.vmid,
+                str(vps.ip_address),
+                timeout=120,
+                interval=3,
+                node=node,
+            ):
+                raise RuntimeError("Guest network verification failed.")
 
             ready_message = "VPS is ready."
             VPS.objects.filter(pk=vps.pk).update(

@@ -166,7 +166,9 @@ class InternalProvisioningTests(TestCase):
         vps.ip_address = "220.100.130.211"
         vps.save(update_fields=["ip_address"])
         with patch("vps.management.commands.provision_vps.proxmox") as proxmox, \
-                patch("vps.management.commands.provision_vps.wait_for_task") as wait:
+                patch("vps.management.commands.provision_vps.wait_for_task") as wait, \
+                patch("vps.management.commands.provision_vps.resolve_vm_node", return_value="test-1"), \
+                patch("vps.management.commands.provision_vps.wait_for_guest_ipv4_match", return_value=True) as verify_ip:
             vm = proxmox.nodes.return_value.qemu.return_value
             vm.config.get.return_value = {"scsi0": "local:disk,size=32G"}
             vm.status.current.get.return_value = {"status": "stopped"}
@@ -179,6 +181,13 @@ class InternalProvisioningTests(TestCase):
         vm.config.set.assert_any_call(
             ipconfig0="ip=220.100.130.211/24,gw=220.100.130.254",
             nameserver="8.8.8.8",
+        )
+        verify_ip.assert_called_once_with(
+            115,
+            "220.100.130.211",
+            timeout=120,
+            interval=3,
+            node="test-1",
         )
 
 

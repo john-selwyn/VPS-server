@@ -103,20 +103,18 @@ def get_task_progress(task):
 
 
 
-def get_guest_ipv4(vmid):
-    """Return the best non-loopback IPv4 reported by QEMU Guest Agent."""
+def get_guest_ipv4_addresses(vmid, *, node=PROXMOX_NODE):
+    """Return all non-loopback IPv4 addresses reported by QEMU Guest Agent."""
     try:
-        data = proxmox.nodes(PROXMOX_NODE).qemu(vmid).agent("network-get-interfaces").get()
+        data = proxmox.nodes(node).qemu(vmid).agent("network-get-interfaces").get()
     except Exception:
-        # Guest-agent availability is eventually consistent after boot and is
-        # a UI/connection-detail enhancement, not a reason to fail the VPS.
         return None
 
     interfaces = data.get("result", []) if isinstance(data, dict) else data
     if not isinstance(interfaces, list):
         return None
 
-    addresses = []
+    addresses = set()
     for interface in interfaces:
         if not isinstance(interface, dict) or interface.get("name") == "lo":
             continue
@@ -132,25 +130,45 @@ def get_guest_ipv4(vmid):
                 continue
             if address.version != 4 or address.is_loopback or address.is_link_local:
                 continue
-            addresses.append(address)
+            addresses.add(str(address))
+    return addresses
 
+
+def get_guest_ipv4(vmid, *, node=PROXMOX_NODE):
+    """Return the best non-loopback IPv4 reported by QEMU Guest Agent."""
+    addresses = get_guest_ipv4_addresses(vmid, node=node)
     if not addresses:
         return None
 
-    # Prefer a globally routable address, then fall back to a private IPv4.
-    addresses.sort(key=lambda address: (not address.is_global, address.is_private, str(address)))
-    return str(addresses[0])
+    parsed = [ipaddress.ip_address(address) for address in addresses]
+    parsed.sort(key=lambda address: (not address.is_global, address.is_private, str(address)))
+    return str(parsed[0])
 
 
-def wait_for_guest_ipv4(vmid, timeout=90, interval=3):
-    """Wait briefly for QEMU Guest Agent/DHCP to report the guest IPv4."""
+def wait_for_guest_ipv4(vmid, timeout=90, interval=3, *, node=PROXMOX_NODE):
+    """Wait briefly for QEMU Guest Agent to report an IPv4 address."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        address = get_guest_ipv4(vmid)
+        address = get_guest_ipv4(vmid, node=node)
         if address:
             return address
         time.sleep(interval)
     return None
+
+
+def wait_for_guest_ipv4_match(vmid, expected_ip, timeout=120, interval=3, *, node=PROXMOX_NODE):
+    """Wait until QEMU Guest Agent reports the exact IPv4 reserved for this VPS."""
+    expected = ipaddress.ip_address(str(expected_ip))
+    if expected.version != 4 or expected.is_loopback or expected.is_link_local:
+        raise ValueError("Expected guest address must be a usable IPv4 address.")
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        addresses = get_guest_ipv4_addresses(vmid, node=node)
+        if addresses and str(expected) in addresses:
+            return True
+        time.sleep(interval)
+    return False
 
 
 class InvalidProxmoxResponse(ValueError):

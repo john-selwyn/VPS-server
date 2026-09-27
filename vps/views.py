@@ -9,7 +9,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 
 from .models import VPS
 from .networking import next_available_ip
-from .proxmox import clone_vps, get_next_vmid
+from .proxmox import clone_vps, get_next_vmid, get_template_vmid
 
 
 def dashboard(request):
@@ -32,6 +32,7 @@ def _configuration_from_request(request):
         raise ValueError("Invalid VPS configuration.") from exc
     if values["cpu"] <= 0 or values["ram"] <= 0 or values["storage"] <= 0:
         raise ValueError("VPS resources must be positive values.")
+    get_template_vmid(values["os"])
     return values
 
 
@@ -42,6 +43,7 @@ def _start_worker(vps_id):
 
 def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
     """Durably reserve VMID/IP first, then submit one Proxmox clone request."""
+    template_vmid = get_template_vmid(configuration["os"])
     vps = None
     for _ in range(3):
         try:
@@ -91,7 +93,7 @@ def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
 
     # The VMID and customer IP are committed before any external side effect.
     try:
-        result = clone_vps(vps.name, vps.vmid)
+        result = clone_vps(vps.name, vps.vmid, template_vmid=template_vmid)
     except Exception as exc:
         VPS.objects.filter(pk=vps.pk).update(
             status="Failed",

@@ -64,6 +64,12 @@ class Command(BaseCommand):
             update(80, "Configuring CPU, RAM and guest agent")
             vm.config.set(cores=vps.cpu, memory=vps.ram * 1024, agent=1)
 
+            if bool(vps.ssh_username) != bool(vps.ssh_public_key):
+                raise RuntimeError("SSH access configuration is incomplete.")
+            if vps.ssh_username and vps.ssh_public_key:
+                update(83, "Configuring SSH access")
+                vm.config.set(ciuser=vps.ssh_username, sshkeys=vps.ssh_public_key)
+
             if not vps.ip_address or str(vps.ip_address) == "0.0.0.0":
                 raise RuntimeError("No static IP address was reserved for this VPS.")
             update(85, "Configuring static network")

@@ -61,6 +61,25 @@ class InternalProvisioningTests(TestCase):
                 del payload[field]
                 self.assertEqual(self.post(payload, **self.auth).status_code, 400)
 
+    def test_optional_ssh_access_is_validated_and_persisted(self):
+        key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEjYzQzM0MTA0Y2QyNDhlMjQ5MTk2ZDA2ZDBlMTA1YzQ2ZTU test@example"
+        payload = {**self.payload, "ssh_username": "vpsuser", "ssh_public_key": key}
+        response = self.post(payload, **self.auth)
+        self.assertEqual(response.status_code, 202)
+        vps = VPS.objects.get(billing_order_id=123)
+        self.assertEqual(vps.ssh_username, "vpsuser")
+        self.assertEqual(vps.ssh_public_key, key)
+
+        for invalid in (
+            {**self.payload, "ssh_username": "root", "ssh_public_key": key},
+            {**self.payload, "ssh_username": "Bad User", "ssh_public_key": key},
+            {**self.payload, "ssh_username": "vpsuser"},
+            {**self.payload, "ssh_public_key": key},
+            {**self.payload, "ssh_username": "vpsuser", "ssh_public_key": "not-a-key"},
+        ):
+            VPS.objects.all().delete()
+            self.assertEqual(self.post(invalid, **self.auth).status_code, 400)
+
     def test_invalid_values(self):
         for field in ("order_id", "cpu", "ram", "storage"):
             for value in (0, -1, True, 1.5, "2", None, 2**64):
@@ -164,7 +183,9 @@ class InternalProvisioningTests(TestCase):
     def test_background_worker_completes_existing_workflow(self):
         vps = VPS.objects.create(name="worker-vps", vmid=115, task_upid="mock-task")
         vps.ip_address = "220.100.130.211"
-        vps.save(update_fields=["ip_address"])
+        vps.ssh_username = "vpsuser"
+        vps.ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEjYzQzM0MTA0Y2QyNDhlMjQ5MTk2ZDA2ZDBlMTA1YzQ2ZTU test@example"
+        vps.save(update_fields=["ip_address", "ssh_username", "ssh_public_key"])
         with patch("vps.management.commands.provision_vps.proxmox") as proxmox, \
                 patch("vps.management.commands.provision_vps.wait_for_task") as wait, \
                 patch("vps.management.commands.provision_vps.resolve_vm_node", return_value="test-1"), \
@@ -178,6 +199,10 @@ class InternalProvisioningTests(TestCase):
             vm.status.start.post.assert_called_once()
         vps.refresh_from_db()
         self.assertEqual((vps.status, vps.progress, vps.ip_address), ("Running", 100, "220.100.130.211"))
+        vm.config.set.assert_any_call(
+            ciuser="vpsuser",
+            sshkeys="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEjYzQzM0MTA0Y2QyNDhlMjQ5MTk2ZDA2ZDBlMTA1YzQ2ZTU test@example",
+        )
         vm.config.set.assert_any_call(
             ipconfig0="ip=220.100.130.211/24,gw=220.100.130.254",
             nameserver="8.8.8.8",

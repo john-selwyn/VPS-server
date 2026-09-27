@@ -11,7 +11,7 @@ Send `Authorization: Bearer <secret>` and `Content-Type: application/json` to
 `POST /api/internal/provision/` with exactly these fields:
 
 ```json
-{"order_id":123,"name":"customer-vps","cpu":2,"ram":4,"storage":50,"os":"Ubuntu 26.04","billing_cycle":"MONTHLY","plan":"VPS Starter"}
+{"order_id":123,"name":"customer-vps","cpu":2,"ram":4,"storage":50,"os":"Ubuntu 26.04","billing_cycle":"MONTHLY","plan":"VPS Starter","ssh_username":"vpsuser","ssh_public_key":"ssh-ed25519 AAAA... customer@example"}
 ```
 
 Order IDs are positive signed 64-bit integers; resources are positive signed

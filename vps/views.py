@@ -66,7 +66,10 @@ def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
                     current_step="Preparing VPS", progress_message="Preparing VPS",
                     cpu=configuration["cpu"], ram=configuration["ram"], storage=configuration["storage"],
                     operating_system=configuration["os"], billing_cycle=configuration["billing"],
-                    plan=configuration.get("plan", f'{configuration["ram"]}GB VPS'), order_token=order_token,
+                    plan=configuration.get("plan", f'{configuration["ram"]}GB VPS'),
+                    ssh_username=configuration.get("ssh_username", ""),
+                    ssh_public_key=configuration.get("ssh_public_key", ""),
+                    order_token=order_token,
                 )
 
                 if reserved_vps is None:

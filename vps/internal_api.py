@@ -1,6 +1,9 @@
 """Authenticated billing integration; provisioning remains owned by views/worker."""
+import base64
+import binascii
 import json
 import logging
+import re
 import uuid
 from functools import wraps
 
@@ -39,14 +42,50 @@ def authenticated(method, *, versioned=False):
     return decorate
 
 
+SSH_KEY_TYPES = {
+    "ssh-ed25519",
+    "ssh-rsa",
+    "ecdsa-sha2-nistp256",
+    "ecdsa-sha2-nistp384",
+    "ecdsa-sha2-nistp521",
+    "sk-ssh-ed25519@openssh.com",
+    "sk-ecdsa-sha2-nistp256@openssh.com",
+}
+
+
+def _validate_ssh_access(username, public_key):
+    if not isinstance(username, str) or not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", username):
+        raise ValueError("ssh_username must be a valid Linux username.")
+    if username in {"root", "daemon", "nobody"}:
+        raise ValueError("ssh_username is reserved.")
+    if not isinstance(public_key, str):
+        raise ValueError("ssh_public_key must be a string.")
+    public_key = public_key.strip()
+    if not public_key or len(public_key) > 4096 or "\n" in public_key or "\r" in public_key:
+        raise ValueError("ssh_public_key must be one OpenSSH public key.")
+    parts = public_key.split(None, 2)
+    if len(parts) < 2 or parts[0] not in SSH_KEY_TYPES:
+        raise ValueError("ssh_public_key uses an unsupported key type.")
+    try:
+        decoded = base64.b64decode(parts[1], validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("ssh_public_key is not valid base64.") from None
+    if len(decoded) < 16 or len(decoded) > 2048:
+        raise ValueError("ssh_public_key has an invalid key blob.")
+    return username, public_key
+
+
 def configuration(data):
     if not isinstance(data, dict):
         raise ValueError("JSON body must be an object.")
     required = {"order_id", "name", "cpu", "ram", "storage", "os", "billing_cycle", "plan"}
+    optional = {"ssh_username", "ssh_public_key"}
     if required - data.keys():
         raise ValueError("Missing required fields: " + ", ".join(sorted(required - data.keys())))
-    if data.keys() - required:
+    if data.keys() - required - optional:
         raise ValueError("Unknown fields are not accepted (including pricing fields).")
+    if ("ssh_username" in data) != ("ssh_public_key" in data):
+        raise ValueError("SSH username and public key must be supplied together.")
     for field in ("order_id", "cpu", "ram", "storage"):
         limit = 9223372036854775807 if field == "order_id" else 2147483647
         if type(data[field]) is not int or not 0 < data[field] <= limit:
@@ -54,9 +93,14 @@ def configuration(data):
     for field, limit in (("name", 100), ("os", 100), ("billing_cycle", 20), ("plan", 50)):
         if not isinstance(data[field], str) or not data[field].strip() or len(data[field]) > limit:
             raise ValueError(f"{field} must be a nonempty string of at most {limit} characters.")
-    return {"name": data["name"].strip(), "cpu": data["cpu"], "ram": data["ram"],
-            "storage": data["storage"], "os": data["os"].strip(),
-            "billing": data["billing_cycle"].strip(), "plan": data["plan"].strip()}
+    result = {"name": data["name"].strip(), "cpu": data["cpu"], "ram": data["ram"],
+              "storage": data["storage"], "os": data["os"].strip(),
+              "billing": data["billing_cycle"].strip(), "plan": data["plan"].strip()}
+    if "ssh_username" in data:
+        result["ssh_username"], result["ssh_public_key"] = _validate_ssh_access(
+            data["ssh_username"], data["ssh_public_key"]
+        )
+    return result
 
 
 @csrf_exempt

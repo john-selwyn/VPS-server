@@ -15,6 +15,8 @@ class VPS(models.Model):
     operating_system = models.CharField(max_length=100, default="Ubuntu 26.04")
     billing_cycle = models.CharField(max_length=20, default="Monthly")
     plan = models.CharField(max_length=50, default="Basic")
+    ssh_username = models.CharField(max_length=32, blank=True, default="")
+    ssh_public_key = models.TextField(blank=True, default="")
 
     # Provisioning progress
     progress = models.PositiveIntegerField(default=0)

@@ -31,4 +31,5 @@ os.environ.update({
     "PROXMOX_TOKEN_SECRET": "test-only-secret",
     "PROXMOX_NODE": "test-1",
     "VPS_TEMPLATE_VMID": "104",
+    "VPS_TEMPLATE_DEBIAN_13_VMID": "105",
 })

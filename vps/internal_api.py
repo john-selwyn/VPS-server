@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .models import VPS, PowerOperation
-from .proxmox import get_guest_ipv4, get_vm_state, resolve_vm_node
+from .proxmox import get_guest_ipv4, get_vm_state, get_template_vmid, resolve_vm_node
 from .power import AdmissionError, admit_power
 from .power_contract import error_response, json_response, operation_response
 from .views import _create_and_start_clone
@@ -96,6 +96,7 @@ def configuration(data):
     result = {"name": data["name"].strip(), "cpu": data["cpu"], "ram": data["ram"],
               "storage": data["storage"], "os": data["os"].strip(),
               "billing": data["billing_cycle"].strip(), "plan": data["plan"].strip()}
+    get_template_vmid(result["os"])
     if "ssh_username" in data:
         result["ssh_username"], result["ssh_public_key"] = _validate_ssh_access(
             data["ssh_username"], data["ssh_public_key"]

@@ -1,4 +1,5 @@
 import re
+from urllib.parse import quote
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -68,7 +69,10 @@ class Command(BaseCommand):
                 raise RuntimeError("SSH access configuration is incomplete.")
             if vps.ssh_username and vps.ssh_public_key:
                 update(83, "Configuring SSH access")
-                vm.config.set(ciuser=vps.ssh_username, sshkeys=vps.ssh_public_key)
+                vm.config.set(
+                    ciuser=vps.ssh_username,
+                    sshkeys=quote(vps.ssh_public_key.strip(), safe=""),
+                )
 
             if not vps.ip_address or str(vps.ip_address) == "0.0.0.0":
                 raise RuntimeError("No static IP address was reserved for this VPS.")

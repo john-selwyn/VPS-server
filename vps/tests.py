@@ -201,7 +201,7 @@ class InternalProvisioningTests(TestCase):
         self.assertEqual((vps.status, vps.progress, vps.ip_address), ("Running", 100, "220.100.130.211"))
         vm.config.set.assert_any_call(
             ciuser="vpsuser",
-            sshkeys="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEjYzQzM0MTA0Y2QyNDhlMjQ5MTk2ZDA2ZDBlMTA1YzQ2ZTU test@example",
+            sshkeys="ssh-ed25519%20AAAAC3NzaC1lZDI1NTE5AAAAIEjYzQzM0MTA0Y2QyNDhlMjQ5MTk2ZDA2ZDBlMTA1YzQ2ZTU%20test%40example",
         )
         vm.config.set.assert_any_call(
             ipconfig0="ip=220.100.130.211/24,gw=220.100.130.254",

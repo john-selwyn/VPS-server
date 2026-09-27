@@ -107,8 +107,23 @@ class InternalProvisioningTests(TestCase):
         self.assertEqual(retry.status_code, 200)
         self.assertEqual(retry.json(), response.json())
         self.assertEqual(VPS.objects.count(), 1)
-        self.clone_vps.assert_called_once_with("customer-vps", 115)
+        self.clone_vps.assert_called_once_with("customer-vps", 115, template_vmid=104)
         self.get_next_vmid.assert_called_once()
+
+    def test_debian_uses_its_own_template(self):
+        payload = {**self.payload, "order_id": 124, "os": "Debian 13"}
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.post(payload, **self.auth)
+        self.assertEqual(response.status_code, 202)
+        vps = VPS.objects.get(billing_order_id=124)
+        self.assertEqual(vps.operating_system, "Debian 13")
+        self.clone_vps.assert_called_once_with("customer-vps", 115, template_vmid=105)
+
+    def test_unsupported_os_is_rejected_before_reservation(self):
+        response = self.post({**self.payload, "os": "Windows 11"}, **self.auth)
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(VPS.objects.exists())
+        self.clone_vps.assert_not_called()
 
     def test_failed_clone_is_not_retried(self):
         self.clone_vps.side_effect = RuntimeError("Sensitive internal details")
@@ -148,8 +163,9 @@ class InternalProvisioningTests(TestCase):
         self.clone_vps.assert_not_called()
 
     def test_vm_and_ip_reservation_are_committed_before_clone_submission(self):
-        def clone(name, vmid):
+        def clone(name, vmid, *, template_vmid):
             from django.db import connection
+            self.assertEqual(template_vmid, 104)
             self.assertFalse(connection.in_atomic_block)
             reserved = VPS.objects.get(billing_order_id=123)
             self.assertEqual(reserved.vmid, vmid)

@@ -16,6 +16,7 @@ PROXMOX_TOKEN_NAME = os.getenv("PROXMOX_TOKEN_NAME")
 PROXMOX_TOKEN_SECRET = os.getenv("PROXMOX_TOKEN_SECRET")
 PROXMOX_NODE = os.getenv("PROXMOX_NODE", "").strip()
 VPS_TEMPLATE_VMID_RAW = os.getenv("VPS_TEMPLATE_VMID", "").strip()
+VPS_TEMPLATE_DEBIAN_13_VMID_RAW = os.getenv("VPS_TEMPLATE_DEBIAN_13_VMID", "").strip()
 
 if not all((
     PROXMOX_HOST, PROXMOX_USER, PROXMOX_TOKEN_NAME, PROXMOX_TOKEN_SECRET,
@@ -29,6 +30,26 @@ except ValueError as exc:
     raise RuntimeError("VPS_TEMPLATE_VMID must be a positive integer.") from exc
 if VPS_TEMPLATE_VMID <= 0:
     raise RuntimeError("VPS_TEMPLATE_VMID must be a positive integer.")
+
+VPS_OS_TEMPLATES = {"Ubuntu 26.04": VPS_TEMPLATE_VMID}
+if VPS_TEMPLATE_DEBIAN_13_VMID_RAW:
+    try:
+        debian_template_vmid = int(VPS_TEMPLATE_DEBIAN_13_VMID_RAW)
+    except ValueError as exc:
+        raise RuntimeError("VPS_TEMPLATE_DEBIAN_13_VMID must be a positive integer.") from exc
+    if debian_template_vmid <= 0:
+        raise RuntimeError("VPS_TEMPLATE_DEBIAN_13_VMID must be a positive integer.")
+    VPS_OS_TEMPLATES["Debian 13"] = debian_template_vmid
+
+
+def get_template_vmid(operating_system):
+    if not isinstance(operating_system, str):
+        raise ValueError("Unsupported operating system.")
+    try:
+        return VPS_OS_TEMPLATES[operating_system.strip()]
+    except KeyError:
+        raise ValueError("Unsupported or unconfigured operating system.") from None
+
 
 proxmox = ProxmoxAPI(
     PROXMOX_HOST, user=PROXMOX_USER, token_name=PROXMOX_TOKEN_NAME,
@@ -273,15 +294,18 @@ def get_power_task_status(task, *, node=PROXMOX_NODE):
     raise InvalidProxmoxResponse("Invalid task response.")
 
 
-def clone_vps(name, vmid):
+def clone_vps(name, vmid, *, template_vmid=None):
     """Start a clone and return immediately with the Proxmox UPID.
 
     Waiting and post-clone configuration are intentionally performed by the
     provisioning worker, never by a request or status-poll endpoint.
     """
     safe_name = sanitize_vps_name(name)
+    template_vmid = VPS_TEMPLATE_VMID if template_vmid is None else int(template_vmid)
+    if template_vmid <= 0:
+        raise ValueError("Template VMID must be a positive integer.")
 
-    task = proxmox.nodes(PROXMOX_NODE).qemu(VPS_TEMPLATE_VMID).clone.create(
+    task = proxmox.nodes(PROXMOX_NODE).qemu(template_vmid).clone.create(
         newid=vmid,
         name=safe_name,
         target=PROXMOX_NODE,

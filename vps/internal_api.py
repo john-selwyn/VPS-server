@@ -19,6 +19,7 @@ from .proxmox import get_guest_ipv4, get_vm_state, get_template_vmid, resolve_vm
 from .power import AdmissionError, admit_power
 from .power_contract import error_response, json_response, operation_response
 from .views import _create_and_start_clone
+from .public_ssh import endpoint_fields
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +150,8 @@ def status(request, billing_order_id):
     return JsonResponse({"billing_order_id": vps.billing_order_id, "vps_id": vps.pk,
         "vmid": vps.vmid, "status": vps.status, "progress": vps.progress,
         "current_step": vps.current_step, "ip_address": vps.ip_address,
-        "error_message": "Provisioning failed. Contact the provisioning operator." if vps.error_message else ""})
+        "error_message": "Provisioning failed. Contact the provisioning operator." if vps.error_message else "",
+        **endpoint_fields(vps)})
 
 
 @csrf_exempt
@@ -177,6 +179,7 @@ def vps_state(request, billing_order_id):
         "state": state,
         "observed_at": timezone.now().isoformat(),
         "ip_address": vps.ip_address,
+        **endpoint_fields(vps),
     })
 
 

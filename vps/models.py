@@ -48,6 +48,25 @@ class VPS(models.Model):
         return self.name
 
 
+class PublicSSHAccess(models.Model):
+    """Ports stay reserved across failures and retries; never recycle implicitly."""
+    vps = models.OneToOneField(VPS, on_delete=models.PROTECT, related_name="public_ssh_access")
+    host = models.CharField(max_length=253)
+    port = models.PositiveIntegerField(unique=True)
+    status = models.CharField(max_length=7, default="pending",
+                              choices=[("pending", "Pending"), ("ready", "Ready"), ("failed", "Failed")])
+    error_code = models.CharField(max_length=40, blank=True, default="")
+    lease = models.UUIDField(null=True, editable=False)
+    claimed_at = models.DateTimeField(null=True)
+    retry_at = models.DateTimeField(null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [models.CheckConstraint(
+            condition=models.Q(port__gte=1024, port__lte=65535), name="public_ssh_valid_port"
+        )]
+
+
 class PowerOperation(models.Model):
     """Durable command reservation. Never delete keys to make a retry executable."""
 

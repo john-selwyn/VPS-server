@@ -1,0 +1,7 @@
+{
+  "bind_ip": "10.50.0.10",
+  "guest_network": "10.60.0.0/24",
+  "bridge": "vmbr1",
+  "port_start": 22000,
+  "port_end": 22999
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=Customer VPS public SSH access worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Replace these three deployment values with the existing provisioner service values.
+User=REPLACE_PROVISIONER_USER
+WorkingDirectory=REPLACE_PROVISIONER_DIRECTORY
+ExecStart=REPLACE_PROVISIONER_DIRECTORY/venv/bin/python -u manage.py process_public_ssh
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

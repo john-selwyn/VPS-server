@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from vps.models import VPS
+from vps.public_ssh import PublicSSHError, sync_access
 from vps.proxmox import (
     PROXMOX_NODE,
     get_task_progress,
@@ -130,3 +131,11 @@ class Command(BaseCommand):
             VPS.objects.filter(pk=vps.pk).update(status="Failed", current_step="Provisioning failed.",
                 progress_message="Provisioning failed.", error_message=str(exc))
             raise CommandError(str(exc)) from exc
+
+        # Access setup has its own retries; it must never turn a running VM or a
+        # verified payment into a failed provision after the VM is already ready.
+        if settings.PUBLIC_SSH_ENABLED:
+            try:
+                sync_access(vps.pk)
+            except PublicSSHError as exc:
+                self.stderr.write(f"Public SSH setup will retry: {exc.code}")

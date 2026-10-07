@@ -135,3 +135,12 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Enable only after the restricted helper and router port range are configured.
+PUBLIC_SSH_ENABLED = os.getenv("PUBLIC_SSH_ENABLED", "False").strip().lower() == "true"
+PUBLIC_SSH_HOST = os.getenv("PUBLIC_SSH_HOST", "")
+PUBLIC_SSH_PORT_START = os.getenv("PUBLIC_SSH_PORT_START", "22000")
+PUBLIC_SSH_PORT_END = os.getenv("PUBLIC_SSH_PORT_END", "22999")
+PUBLIC_SSH_RELAY_HOST = os.getenv("PUBLIC_SSH_RELAY_HOST", "")
+PUBLIC_SSH_RELAY_KEY = os.getenv("PUBLIC_SSH_RELAY_KEY", "")
+PUBLIC_SSH_RELAY_KNOWN_HOSTS = os.getenv("PUBLIC_SSH_RELAY_KNOWN_HOSTS", "")

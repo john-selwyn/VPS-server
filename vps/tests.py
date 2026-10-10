@@ -1,3 +1,4 @@
+import ipaddress
 import json
 
 import requests
@@ -33,6 +34,15 @@ class ProxmoxTaskRecoveryTests(TestCase):
 
 
 @override_settings(BILLING_API_SECRET="test-only-shared-secret")
+@override_settings(
+    VPS_IP_POOL_START=ipaddress.IPv4Address("220.100.130.211"),
+    VPS_IP_POOL_END=ipaddress.IPv4Address("220.100.130.213"),
+    VPS_IP_NETWORK=ipaddress.IPv4Network("220.100.130.0/24"),
+    VPS_IP_GATEWAY=ipaddress.IPv4Address("220.100.130.254"),
+    VPS_IP_PREFIX=24,
+    VPS_IP_DNS=ipaddress.IPv4Address("8.8.8.8"),
+    PUBLIC_SSH_ENABLED=False,
+)
 class InternalProvisioningTests(TestCase):
     url = "/api/internal/provision/"
     auth = {"HTTP_AUTHORIZATION": "Bearer test-only-shared-secret"}
@@ -230,7 +240,10 @@ class InternalProvisioningTests(TestCase):
                 patch("vps.management.commands.provision_vps.resolve_vm_node", return_value="test-1"), \
                 patch("vps.management.commands.provision_vps.wait_for_guest_ipv4_match", return_value=True) as verify_ip:
             vm = proxmox.nodes.return_value.qemu.return_value
-            vm.config.get.return_value = {"scsi0": "local:disk,size=32G"}
+            vm.config.get.return_value = {
+                "net0": "virtio=BC:24:11:AA:BB:CC,bridge=vmbr0,firewall=1",
+                "scsi0": "local:disk,size=32G",
+            }
             vm.status.current.get.return_value = {"status": "stopped"}
             vm.status.start.post.return_value = "mock-start"
             call_command("provision_vps", vps.pk)
@@ -241,6 +254,9 @@ class InternalProvisioningTests(TestCase):
         vm.config.set.assert_any_call(
             ciuser="vpsuser",
             sshkeys="ssh-ed25519%20AAAAC3NzaC1lZDI1NTE5AAAAIEjYzQzM0MTA0Y2QyNDhlMjQ5MTk2ZDA2ZDBlMTA1YzQ2ZTU%20test%40example",
+        )
+        vm.config.set.assert_any_call(
+            net0="virtio=BC:24:11:AA:BB:CC,bridge=vmbr1,firewall=1",
         )
         vm.config.set.assert_any_call(
             ipconfig0="ip=220.100.130.211/24,gw=220.100.130.254",
@@ -282,6 +298,15 @@ class ReservationCommitTests(TransactionTestCase):
         self.assertEqual(VPS.objects.count(), 1)
 
 
+@override_settings(
+    VPS_IP_POOL_START=ipaddress.IPv4Address("220.100.130.211"),
+    VPS_IP_POOL_END=ipaddress.IPv4Address("220.100.130.213"),
+    VPS_IP_NETWORK=ipaddress.IPv4Network("220.100.130.0/24"),
+    VPS_IP_GATEWAY=ipaddress.IPv4Address("220.100.130.254"),
+    VPS_IP_PREFIX=24,
+    VPS_IP_DNS=ipaddress.IPv4Address("8.8.8.8"),
+    PUBLIC_SSH_ENABLED=False,
+)
 class StaticIPAllocationTests(TestCase):
     def test_allocator_skips_reserved_addresses(self):
         self.assertEqual(next_available_ip([]), "220.100.130.211")

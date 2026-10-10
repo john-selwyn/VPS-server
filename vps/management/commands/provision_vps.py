@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from vps.models import VPS
+from vps.windows_credentials import decrypt_windows_password
 from vps.public_ssh import PublicSSHError, sync_access
 from vps.proxmox import (
     PROXMOX_NODE,
@@ -66,9 +67,21 @@ class Command(BaseCommand):
             update(80, "Configuring CPU, RAM and guest agent")
             vm.config.set(cores=vps.cpu, memory=vps.ram * 1024, agent=1)
 
+            if vps.operating_system == "Windows 11":
+                update(82, "Configuring Windows access")
+                if config.get("ostype") != "win11":
+                    raise RuntimeError("Windows template has an unexpected OS type.")
+                password = decrypt_windows_password(vps.windows_password_encrypted)
+                try:
+                    vm.config.set(ciuser="Admin", cipassword=password)
+                except Exception:
+                    raise RuntimeError("Windows access configuration failed.") from None
+                finally:
+                    del password
+
             if bool(vps.ssh_username) != bool(vps.ssh_public_key):
                 raise RuntimeError("SSH access configuration is incomplete.")
-            if vps.ssh_username and vps.ssh_public_key:
+            if vps.operating_system != "Windows 11" and vps.ssh_username and vps.ssh_public_key:
                 update(83, "Configuring SSH access")
                 vm.config.set(
                     ciuser=vps.ssh_username,
@@ -77,6 +90,26 @@ class Command(BaseCommand):
 
             if not vps.ip_address or str(vps.ip_address) == "0.0.0.0":
                 raise RuntimeError("No static IP address was reserved for this VPS.")
+
+            update(84, "Attaching customer network")
+            config = vm.config.get()
+            net0 = config.get("net0")
+            if not isinstance(net0, str) or not net0.strip():
+                raise RuntimeError("The cloned VPS has no usable primary network interface.")
+
+            net0_parts = [part.strip() for part in net0.split(",") if part.strip()]
+            bridge_found = False
+            for index, part in enumerate(net0_parts):
+                if part.startswith("bridge="):
+                    net0_parts[index] = f"bridge={settings.VPS_BRIDGE}"
+                    bridge_found = True
+                    break
+
+            if not bridge_found:
+                net0_parts.append(f"bridge={settings.VPS_BRIDGE}")
+
+            vm.config.set(net0=",".join(net0_parts))
+
             update(85, "Configuring static network")
             vm.config.set(
                 ipconfig0=f"ip={vps.ip_address}/{settings.VPS_IP_PREFIX},gw={settings.VPS_IP_GATEWAY}",
@@ -113,7 +146,7 @@ class Command(BaseCommand):
             if not wait_for_guest_ipv4_match(
                 vps.vmid,
                 str(vps.ip_address),
-                timeout=120,
+                timeout=600 if vm.config.get().get("ostype") == "win11" else 120,
                 interval=3,
                 node=node,
             ):

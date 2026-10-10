@@ -12,8 +12,12 @@ or a new router rule. A reserved port is never automatically recycled, even
 after a failed attempt. Retiring a VPS and its port needs an explicit operator
 procedure; this release does not implement deletion or port recycling.
 
-This release supports the existing Ubuntu/Debian SSH workflow. Windows/RDP and
-dedicated public IP or 1:1 NAT allocation require a separate implementation.
+The original release supports the existing Ubuntu/Debian SSH workflow. The
+Windows restriction is superseded by [WINDOWS_RDP.md](WINDOWS_RDP.md). Dedicated
+public IP or 1:1 NAT allocation still requires a separate implementation.
+
+For Windows deployments, preserve the live RDP-capable helper. The historical
+`deploy/proxmox_ssh_relay.py` below supports only SSH and must not replace it.
 
 ## Deployment order
 

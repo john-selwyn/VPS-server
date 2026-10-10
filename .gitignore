@@ -13,3 +13,17 @@ media/
 .gitconfig
 .lesshst
 .psql_history
+
+# Local environment backups
+.env.before-*
+*.before-vps-isolation
+*.before-vps-storage
+*.before-vmbr1-test-fix
+
+# Local SSH host keys/cache
+.ssh/known_hosts
+.ssh/known_hosts.old
+.env.*
+!.env.example
+.ssh/
+*.before-*

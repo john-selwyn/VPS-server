@@ -20,8 +20,10 @@ class Command(BaseCommand):
             raise CommandError("PUBLIC_SSH_ENABLED must be enabled after completing relay setup.")
         while True:
             now = timezone.now()
-            records = VPS.objects.filter(status="Running").exclude(
-                ssh_username="").exclude(ssh_public_key="").exclude(public_ssh_access__status="ready")
+            records = VPS.objects.filter(status="Running").filter(
+                (Q(operating_system="Windows 11") & ~Q(windows_password_encrypted=""))
+                | (~Q(operating_system="Windows 11") & ~Q(ssh_username="") & ~Q(ssh_public_key=""))
+            ).exclude(public_ssh_access__status="ready")
             records = records.filter(
                 Q(public_ssh_access__retry_at__isnull=True) | Q(public_ssh_access__retry_at__lte=now)
             ).filter(

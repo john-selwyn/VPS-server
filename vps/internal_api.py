@@ -98,6 +98,11 @@ def configuration(data):
               "storage": data["storage"], "os": data["os"].strip(),
               "billing": data["billing_cycle"].strip(), "plan": data["plan"].strip()}
     get_template_vmid(result["os"])
+    if result["os"] == "Windows 11":
+        if result["cpu"] < 2 or result["ram"] < 4 or result["storage"] < 64:
+            raise ValueError("Windows 11 requires at least 2 CPUs, 4 GB RAM, and 64 GB storage.")
+    if result["os"] == "Windows 11" and ("ssh_username" in data or "ssh_public_key" in data):
+        raise ValueError("Windows VPS access uses RDP credentials.")
     if "ssh_username" in data:
         result["ssh_username"], result["ssh_public_key"] = _validate_ssh_access(
             data["ssh_username"], data["ssh_public_key"]

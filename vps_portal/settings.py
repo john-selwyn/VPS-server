@@ -1,5 +1,6 @@
 import ipaddress
 import os
+import re
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
@@ -135,6 +136,11 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Customer guests use the isolated bridge; do not inherit a template's management bridge.
+VPS_BRIDGE = os.getenv("VPS_BRIDGE", "vmbr1").strip()
+if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,14}", VPS_BRIDGE):
+    raise ImproperlyConfigured("VPS_BRIDGE must be a valid bridge interface name.")
 
 # Enable only after the restricted helper and router port range are configured.
 PUBLIC_SSH_ENABLED = os.getenv("PUBLIC_SSH_ENABLED", "False").strip().lower() == "true"

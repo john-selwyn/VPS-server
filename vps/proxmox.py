@@ -44,6 +44,18 @@ if VPS_TEMPLATE_DEBIAN_13_VMID_RAW:
     VPS_OS_TEMPLATES["Debian 13"] = debian_template_vmid
 
 
+
+windows_template_raw = os.getenv("VPS_TEMPLATE_WINDOWS_11_VMID", "").strip()
+if windows_template_raw:
+    try:
+        windows_template_vmid = int(windows_template_raw)
+    except ValueError as exc:
+        raise RuntimeError("VPS_TEMPLATE_WINDOWS_11_VMID must be a positive integer.") from exc
+    if windows_template_vmid <= 0:
+        raise RuntimeError("VPS_TEMPLATE_WINDOWS_11_VMID must be a positive integer.")
+    VPS_OS_TEMPLATES["Windows 11"] = windows_template_vmid
+
+
 def get_template_vmid(operating_system):
     if not isinstance(operating_system, str):
         raise ValueError("Unsupported operating system.")
@@ -312,7 +324,7 @@ def clone_vps(name, vmid, *, template_vmid=None):
         name=safe_name,
         target=PROXMOX_NODE,
         full=1,
-        storage="local-lvm",
+        storage="vps-storage",
     )
 
     return {

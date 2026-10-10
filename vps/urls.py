@@ -2,7 +2,11 @@ from django.urls import path
 from . import views
 from . import internal_api
 
+from . import windows_api
+
 urlpatterns = [
+    path("api/internal/v1/vps/<int:billing_order_id>/windows-credentials/",
+         windows_api.windows_credentials, name="internal_windows_credentials"),
     path("api/internal/provision/", internal_api.provision, name="internal_provision"),
     path("api/internal/provision/<int:billing_order_id>/status/", internal_api.status, name="internal_provision_status"),
     path("api/internal/vps/<int:billing_order_id>/", internal_api.vps_state, name="internal_vps_state"),

@@ -60,7 +60,9 @@ def _eligible(vps):
     except (ValueError, TypeError):
         raise PublicSSHError("SSH_ACCESS_NOT_READY") from None
     if (vps.status != "Running" or not vps.vmid or not vps.billing_order_id
-            or not vps.ssh_username or not vps.ssh_public_key
+            or (vps.operating_system == "Windows 11" and not vps.windows_password_encrypted)
+            or (vps.operating_system != "Windows 11"
+                and (not vps.ssh_username or not vps.ssh_public_key))
             or ip not in settings.VPS_IP_NETWORK
             or ip in {settings.VPS_IP_NETWORK.network_address,
                       settings.VPS_IP_NETWORK.broadcast_address, settings.VPS_IP_GATEWAY}):
@@ -99,7 +101,10 @@ def reserve_access(vps_id, *, port=None):
 def _request_relay(access, config):
     vps = access.vps
     request = {"vmid": vps.vmid, "order_id": vps.billing_order_id,
-               "ip": str(vps.ip_address), "port": access.port, "username": vps.ssh_username}
+               "ip": str(vps.ip_address), "port": access.port,
+               "username": "Admin" if vps.operating_system == "Windows 11" else vps.ssh_username}
+    if vps.operating_system == "Windows 11":
+        request["protocol"] = "rdp"
     argv = ["/usr/bin/ssh", "-F", "/dev/null", "-T", "-i", config.key,
             "-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
             "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={config.known_hosts}",
@@ -153,4 +158,7 @@ def endpoint_fields(vps):
     if not settings.PUBLIC_SSH_ENABLED:
         return {}  # Backwards-compatible with deployed manually assigned endpoints.
     access = PublicSSHAccess.objects.filter(vps=vps, vps__status="Running", status="ready").first()
+    if vps.operating_system == "Windows 11":
+        return {"ssh_access": None, "rdp_access":
+            {"host": access.host, "port": access.port, "username": "Admin"} if access else None}
     return {"ssh_access": {"host": access.host, "port": access.port} if access else None}

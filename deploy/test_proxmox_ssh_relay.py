@@ -106,6 +106,41 @@ class RelayTests(unittest.TestCase):
         self.assertIn("TARGET_ALREADY_ASSIGNED", results)
         self.assertEqual(len(json.loads((self.relay.state / "claims.json").read_text())), 1)
 
+    def windows_request(self):
+        self.config = self.config.replace("ciuser: vpsuser", "ciuser: Admin") + "ostype: win11\n"
+        return {**self.request, "username": "Admin", "protocol": "rdp"}
+
+    def test_rdp_idempotent_service_and_tcp_probes(self):
+        request = self.windows_request()
+        with patch("deploy.proxmox_ssh_relay.probe_tcp") as probe:
+            self.assertEqual(self.relay.ensure(request), {**request, "ready": True})
+            self.relay.ensure(request)
+        self.assertIn("TCP:10.60.0.15:3389", (self.units / "vps-1016-rdp-relay.service").read_text())
+        self.assertEqual(probe.call_args_list[0].args, ("10.60.0.15", 3389))
+        self.assertEqual(probe.call_args_list[1].args, ("10.50.0.10", 22015))
+        self.probe.assert_not_called()
+        self.assertEqual(sum(call.args[0][-1] == "daemon-reload" for call in self.runner.call_args_list), 1)
+        self.assertEqual(json.loads((self.relay.state / "claims.json").read_text()), {"1016": request})
+
+    def test_rejects_wrong_rdp_os_user_protocol_and_ssh_on_windows(self):
+        request = self.windows_request()
+        for invalid in ({**request, "username": "vpsuser"}, {**request, "protocol": "http"},
+                        {**request, "username": "vpsuser", "protocol": "ssh"}):
+            with self.subTest(invalid=invalid), self.assertRaises(RelayError):
+                self.relay.validate(invalid)
+        self.config = self.config.replace("ostype: win11", "ostype: l26")
+        with self.assertRaisesRegex(RelayError, "VM_TARGET_MISMATCH"):
+            self.relay.validate(request)
+        self.assertFalse(self.relay.state.exists())
+
+    def test_failed_rdp_probe_keeps_claim_without_service(self):
+        request = self.windows_request()
+        with patch("deploy.proxmox_ssh_relay.probe_tcp", side_effect=OSError("unavailable")):
+            with self.assertRaises(OSError):
+                self.relay.ensure(request)
+        self.assertTrue((self.relay.state / "claims.json").exists())
+        self.assertFalse(list(self.units.iterdir()))
+
     def test_duplicate_fields_and_nonssh_banner_are_rejected(self):
         path = Mock()
         path.lstat.return_value = Mock(st_uid=0, st_mode=0o100600)

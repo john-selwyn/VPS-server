@@ -8,6 +8,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .models import VPS
+from .windows_credentials import generate_encrypted_password
 from .networking import next_available_ip
 from .proxmox import clone_vps, get_next_vmid, get_template_vmid
 
@@ -33,6 +34,9 @@ def _configuration_from_request(request):
     if values["cpu"] <= 0 or values["ram"] <= 0 or values["storage"] <= 0:
         raise ValueError("VPS resources must be positive values.")
     get_template_vmid(values["os"])
+    if values["os"] == "Windows 11":
+        if values["cpu"] < 2 or values["ram"] < 4 or values["storage"] < 64:
+            raise ValueError("Windows 11 requires at least 2 CPUs, 4 GB RAM, and 64 GB storage.")
     return values
 
 
@@ -44,6 +48,8 @@ def _start_worker(vps_id):
 def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
     """Durably reserve VMID/IP first, then submit one Proxmox clone request."""
     template_vmid = get_template_vmid(configuration["os"])
+    encrypted_password = (generate_encrypted_password()
+        if configuration["os"] == "Windows 11" else "")
     vps = None
     for _ in range(3):
         try:
@@ -69,6 +75,7 @@ def _create_and_start_clone(configuration, order_token, *, reserved_vps=None):
                     cpu=configuration["cpu"], ram=configuration["ram"], storage=configuration["storage"],
                     operating_system=configuration["os"], billing_cycle=configuration["billing"],
                     plan=configuration.get("plan", f'{configuration["ram"]}GB VPS'),
+                    windows_password_encrypted=encrypted_password,
                     ssh_username=configuration.get("ssh_username", ""),
                     ssh_public_key=configuration.get("ssh_public_key", ""),
                     order_token=order_token,

@@ -72,6 +72,11 @@ def probe_ssh(host, port):
             raise RelayError("SSH_NOT_READY")
 
 
+def probe_tcp(host, port):
+    with socket.create_connection((host, port), timeout=3):
+        pass
+
+
 def atomic_write(path, content, mode):
     fd, temporary = tempfile.mkstemp(prefix=".relay-", dir=path.parent)
     try:
@@ -98,7 +103,12 @@ class Relay:
         self.run, self.probe = runner, probe
 
     def validate(self, request):
-        if not isinstance(request, dict) or set(request) != {"vmid", "order_id", "ip", "port", "username"}:
+        fields = {"vmid", "order_id", "ip", "port", "username"}
+        if not isinstance(request, dict) or set(request) not in (fields, fields | {"protocol"}):
+            raise RelayError("INVALID_REQUEST")
+        protocol = request.get("protocol", "ssh")
+        if protocol not in ("ssh", "rdp"):
+            raise RelayError("INVALID_REQUEST")
             raise RelayError("INVALID_REQUEST")
         for field, minimum, maximum in (("vmid", 100, 999999999), ("order_id", 1, 9223372036854775807)):
             if type(request[field]) is not int or not minimum <= request[field] <= maximum:
@@ -106,7 +116,9 @@ class Relay:
         if (type(request["port"]) is not int
                 or not self.policy["port_start"] <= request["port"] <= self.policy["port_end"]
                 or not isinstance(request["username"], str)
-                or not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", request["username"])
+                or not re.fullmatch(
+                    r"Admin" if protocol == "rdp" else r"[a-z_][a-z0-9_-]{0,31}",
+                    request["username"])
                 or request["username"] == "root"):
             raise RelayError("INVALID_REQUEST")
         try:
@@ -131,11 +143,16 @@ class Relay:
                 or network_options.get("bridge") != self.policy["bridge"]
                 or not re.fullmatch(rf"customer-[0-9]+-vps-{request['order_id']}", config.get("name", ""))
                 or config.get("ciuser") != request["username"]
+                or (protocol == "rdp" and config.get("ostype") != "win11")
+                or (protocol == "ssh" and config.get("ostype", "").startswith("win"))
                 or config.get("template") == "1"):
             raise RelayError("VM_TARGET_MISMATCH")
 
     def ensure(self, request):
         self.validate(request)
+        protocol = request.get("protocol", "ssh")
+        target_port = 3389 if protocol == "rdp" else 22
+        probe = probe_tcp if protocol == "rdp" else self.probe
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
         trusted_file(self.state)
         lock = self.state / "lock"
@@ -155,10 +172,10 @@ class Relay:
             for vmid, claim in claims.items():
                 if vmid != key and (claim["port"] == request["port"] or claim["ip"] == request["ip"]):
                     raise RelayError("TARGET_ALREADY_ASSIGNED")
-            unit_name = f"vps-{request['vmid']}-ssh-relay.service"
+            unit_name = f"vps-{request['vmid']}-{protocol}-relay.service"
             unit = self.units / unit_name
             command = (f"/usr/bin/socat TCP-LISTEN:{request['port']},bind={self.policy['bind_ip']},reuseaddr,fork "
-                       f"TCP:{request['ip']}:22")
+                       f"TCP:{request['ip']}:{target_port}")
             if unit.exists():
                 trusted_file(unit)
                 starts = re.findall(r"(?m)^ExecStart=(.+)$", unit.read_text())
@@ -167,9 +184,9 @@ class Relay:
             # Persist ownership before any service change, including failed starts.
             claims[key] = request
             atomic_write(registry, json.dumps(claims, sort_keys=True) + "\n", 0o600)
-            self.probe(request["ip"], 22)
+            probe(request["ip"], target_port)
             if not unit.exists():
-                content = ("[Unit]\nDescription=Public SSH relay for VPS " + str(request["vmid"]) +
+                content = ("[Unit]\nDescription=Public " + protocol.upper() + " relay for VPS " + str(request["vmid"]) +
                     "\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\n" +
                     "User=nobody\nGroup=nogroup\nExecStart=" + command +
                     "\nRestart=always\nRestartSec=3\nNoNewPrivileges=yes\nPrivateTmp=yes\n" +
@@ -180,7 +197,7 @@ class Relay:
             # --now leaves an already running service and its connections intact.
             self.run(["/usr/bin/systemctl", "enable", "--now", unit_name])
             self.run(["/usr/bin/systemctl", "is-active", "--quiet", unit_name])
-            self.probe(self.policy["bind_ip"], request["port"])
+            probe(self.policy["bind_ip"], request["port"])
             return {**request, "ready": True}
 
 

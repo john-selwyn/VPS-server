@@ -17,7 +17,7 @@ Windows restriction is superseded by [WINDOWS_RDP.md](WINDOWS_RDP.md). Dedicated
 public IP or 1:1 NAT allocation still requires a separate implementation.
 
 For Windows deployments, preserve the live RDP-capable helper. The historical
-`deploy/proxmox_ssh_relay.py` below supports only SSH and must not replace it.
+`deploy/proxmox_ssh_relay.py` now captures that live SSH/RDP helper; preserve its policy and claims during deployment.
 
 ## Deployment order
 

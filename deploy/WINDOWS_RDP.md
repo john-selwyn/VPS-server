@@ -73,9 +73,10 @@ reserved port or bypass its ownership records.
 
 ### Live relay prerequisite: preserve the deployed helper
 
-The exported patch does not contain the Proxmox helper. The repository's old
-`deploy/proxmox_ssh_relay.py` is SSH-only. **Do not reinstall that old file over
-the working live RDP helper.** Exact live helper source still needs capture.
+The exact live helper was supplied on 2026-10-10 and is now captured byte-for-byte
+in `deploy/proxmox_ssh_relay.py`, superseding the SSH-only version. No production
+helper replacement was needed. Preserve the policy, claims registry and existing
+service units during deployment.
 
 Live paths on Proxmox:
 
@@ -181,3 +182,21 @@ selection, 600-second verification, failure behavior, and SSH/RDP request shape.
 The local Windows runtime does not validate Linux file ownership/mode or systemd;
 the Linux SSH/relay permission tests require a Linux test environment. PostgreSQL
 locking and subsequent Windows first-boot completion require separate verification.
+
+
+## Relay capture validation — 2026-10-10
+
+The uploaded helper matches the captured source byte-for-byte and parses as Python.
+Nine relay behavior tests passed locally with Linux locking/atomic file writes
+mocked and root trust checks mocked by the test fixtures. These verify SSH service
+adoption, invalid targets, RDP Admin/win11 restrictions, port 3389 forwarding,
+idempotency, and failed readiness probes. The Linux permission and parallel-claim
+tests were excluded from this Windows run. On Linux run:
+
+```sh
+python3 -m unittest deploy.test_proxmox_ssh_relay
+```
+
+No live service, policy or claims registry was modified during capture. An
+unreachable duplicate raise in the supplied helper is retained to preserve the
+source; it does not change request handling.

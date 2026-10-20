@@ -56,6 +56,19 @@ if windows_template_raw:
     VPS_OS_TEMPLATES["Windows 11"] = windows_template_vmid
 
 
+ubuntu_server_template_raw = os.getenv("VPS_TEMPLATE_UBUNTU_SERVER_26_04_VMID", "").strip()
+if ubuntu_server_template_raw:
+    try:
+        ubuntu_server_template_vmid = int(ubuntu_server_template_raw)
+    except ValueError as exc:
+        raise RuntimeError("VPS_TEMPLATE_UBUNTU_SERVER_26_04_VMID must be a positive integer.") from exc
+    if ubuntu_server_template_vmid <= 0:
+        raise RuntimeError("VPS_TEMPLATE_UBUNTU_SERVER_26_04_VMID must be a positive integer.")
+    if ubuntu_server_template_vmid in VPS_OS_TEMPLATES.values():
+        raise RuntimeError("Ubuntu Server requires a separate template VMID.")
+    VPS_OS_TEMPLATES["Ubuntu Server 26.04"] = ubuntu_server_template_vmid
+
+
 def get_template_vmid(operating_system):
     if not isinstance(operating_system, str):
         raise ValueError("Unsupported operating system.")

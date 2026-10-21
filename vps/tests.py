@@ -152,6 +152,25 @@ class InternalProvisioningTests(TestCase):
         self.assertEqual(vps.operating_system, "Debian 13")
         self.clone_vps.assert_called_once_with("customer-vps", 115, template_vmid=105)
 
+    def test_ubuntu_server_uses_separate_template_and_retries_once(self):
+        payload = {**self.payload, "order_id": 124, "os": "Ubuntu Server 26.04"}
+        with patch.dict("vps.proxmox.VPS_OS_TEMPLATES", {"Ubuntu Server 26.04": 107}):
+            with self.captureOnCommitCallbacks(execute=True):
+                first = self.post(payload, **self.auth)
+            retry = self.post(payload, **self.auth)
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(retry.status_code, 200)
+        self.assertEqual(VPS.objects.get(billing_order_id=124).operating_system, "Ubuntu Server 26.04")
+        self.clone_vps.assert_called_once_with("customer-vps", 115, template_vmid=107)
+        self._start_worker.assert_called_once()
+
+    def test_unconfigured_ubuntu_server_is_rejected_before_reservation(self):
+        with patch.dict("vps.proxmox.VPS_OS_TEMPLATES", {"Ubuntu 26.04": 104}, clear=True):
+            response = self.post({**self.payload, "os": "Ubuntu Server 26.04"}, **self.auth)
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(VPS.objects.exists())
+        self.clone_vps.assert_not_called()
+
     def test_unsupported_os_is_rejected_before_reservation(self):
         response = self.post({**self.payload, "os": "Windows 11"}, **self.auth)
         self.assertEqual(response.status_code, 400)

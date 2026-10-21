@@ -16,8 +16,8 @@ Send `Authorization: Bearer <secret>` and `Content-Type: application/json` to
 
 Order IDs are positive signed 64-bit integers; resources are positive signed
 32-bit integers (RAM and storage in GB). Text fields must be nonempty and fit
-their model limits. OS, plan and billing cycle are descriptive metadata; actual
-template selection remains the existing provisioning workflow. Pricing fields
+their model limits. OS selects its explicitly configured template; plan and
+billing cycle are descriptive metadata. Pricing fields
 and other unknown fields are rejected.
 
 New requests return 202; retries return 200 with the existing VPS. Inspect
@@ -29,6 +29,21 @@ Poll `GET /api/internal/provision/123/status/` using the same authorization.
 Unknown orders return 404. Responses contain only the billing order ID, VPS ID,
 VMID, status, progress, current step, IP address and a public error message.
 Detailed provisioning exceptions remain internal.
+
+## Separate Ubuntu Server template
+
+`os: "Ubuntu Server 26.04"` is a separate Linux option. Configure
+`VPS_TEMPLATE_UBUNTU_SERVER_26_04_VMID` privately with a newly built and verified
+Ubuntu Server template VMID. It must be positive and different from the existing
+Ubuntu Desktop, Debian and Windows template IDs. If absent, requests for this OS
+are rejected before reservation/cloning; there is no Desktop-template fallback.
+Existing `os: "Ubuntu 26.04"` requests and their template remain unchanged.
+Server uses the existing Linux cloud-init/SSH workflow and idempotent order
+reservation. No provisioner database migration is required.
+
+Build/test the template and deploy this mapping before the portal enables its
+separate `UBUNTU_SERVER_ORDERING_ENABLED` switch. Do not start an end-to-end test
+until the target VMID, image, storage, clone isolation and credentials are reviewed.
 
 The billing order reservation commits before clone submission. Concurrent
 requests are constrained by the database unique key and only the creator may
